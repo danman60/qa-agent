@@ -71,6 +71,7 @@ SYSTEM_PROMPT = """You are a browser testing agent. You receive a page snapshot 
 - PRESS — value = key name ("Enter", "Tab", "Escape")
 - SCROLL — value = "down" or "up"
 - SELECT — role="combobox", name = label, value = option text
+- VERIFY — confirm the task is complete. reasoning MUST describe what you see (e.g. "page shows schedule table with 5 rows of data"). Use ONLY after navigating/interacting and confirming the expected content is visible.
 - NONE — can't determine what to do
 
 ## How the snapshot works
@@ -122,7 +123,8 @@ class ChecklistItem:
             "section": self.section, "step_id": self.step_id,
             "description": self.description, "how": self.how,
             "status": self.status, "result_detail": self.result_detail,
-            "screenshot": self.screenshot, "attempts": self.attempts,
+            "screenshot": os.path.basename(self.screenshot) if self.screenshot else "",
+            "attempts": self.attempts,
             "console_errors": len(self.console_errors),
             "network_errors": len(self.network_errors),
             "model_time": round(self.model_time, 1),
@@ -568,6 +570,9 @@ def execute_action(browser, action):
     elif cmd == "SELECT":
         return browser.select_option(role or "combobox", name, value)
 
+    elif cmd == "VERIFY":
+        return True, action.get("reasoning", "verified")
+
     elif cmd == "NONE":
         return False, "LLM returned NONE"
 
@@ -741,13 +746,28 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
 
         if action["action"] == "NONE":
             reasoning = action.get("reasoning", "").lower()
-            # If LLM says task is complete/loaded/done — that's a PASS, not a failure
-            if any(w in reasoning for w in ["loaded", "complete", "done", "success", "identified", "visible", "found", "shows", "working", "no action"]):
+            # Tight verdict: fail words checked FIRST, then require positive evidence
+            FAIL_PHRASES = ["not visible", "not found", "no data", "not present",
+                            "may still", "couldn't", "can't find", "cannot find",
+                            "empty", "missing", "error", "failed", "unable",
+                            "not loaded", "not showing", "no table", "no content",
+                            "doesn't show", "does not show", "not displayed"]
+            PASS_PHRASES = ["shows", "displays", "contains", "loaded with",
+                            "visible with", "confirmed", "verified", "present",
+                            "working correctly", "page shows", "table shows",
+                            "data is displayed", "successfully", "content loaded",
+                            "rendered", "appears correctly"]
+            if any(p in reasoning for p in FAIL_PHRASES):
+                last_result = f"Observation FAIL: {action.get('reasoning', '')}"
+                continue
+            elif any(p in reasoning for p in PASS_PHRASES):
                 success = True
                 last_result = action.get("reasoning", "Task verified by observation")
                 break
-            last_result = "LLM can't determine action"
-            continue
+            else:
+                # No positive evidence = not verified
+                last_result = f"No positive evidence: {action.get('reasoning', '')}"
+                continue
 
         t1 = time.time()
         ok, detail = execute_action(browser, action)
@@ -757,8 +777,25 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
         if ok:
             state.log(f"  OK: {detail[:100]}", "result")
             last_result = detail[:200]
-            success = True
-            break
+            # VERIFY action = task confirmed, apply tight verdict
+            if action["action"] == "VERIFY":
+                reasoning = action.get("reasoning", "").lower()
+                FAIL_PHRASES = ["not visible", "not found", "no data", "not present",
+                                "may still", "couldn't", "can't find", "cannot find",
+                                "empty", "missing", "error", "failed", "unable",
+                                "not loaded", "not showing", "no table", "no content"]
+                if any(p in reasoning for p in FAIL_PHRASES):
+                    last_result = f"VERIFY negative: {detail[:150]}"
+                    continue
+                success = True
+                break
+            # Non-VERIFY success (CLICK, FILL, etc) — track URL, continue to verify
+            new_url = browser.url
+            if new_url != item.url:
+                state.pages_visited.add(new_url)
+                state.log(f"  Nav: {new_url}", "info")
+                item.url = new_url
+            continue
         else:
             state.log(f"  ERROR: {detail[:100]}", "error")
             last_result = f"ERROR: {detail[:200]}"
@@ -965,6 +1002,9 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 /* Details */
 .detail{font-size:.78rem;color:#475569;margin-top:.3rem;line-height:1.4}
 .detail-how{font-size:.75rem;color:var(--muted);margin-top:.15rem;font-style:italic}
+.thumb{margin-top:.4rem}
+.thumb img{width:120px;height:auto;border-radius:6px;border:1px solid var(--border);cursor:pointer;transition:transform .2s ease,box-shadow .2s ease;box-shadow:var(--shadow)}
+.thumb img:hover{transform:scale(1.05);box-shadow:var(--shadow-md)}
 
 /* Section headers */
 .sec-h{font-weight:700;font-size:.82rem;margin:1.25rem 0 .5rem;color:var(--blue-dark);padding:.4rem .75rem;background:var(--blue-light);border-radius:8px;display:flex;align-items:center;gap:.4rem;letter-spacing:-.01em}
@@ -998,8 +1038,24 @@ class DashHandler(BaseHTTPRequestHandler):
         s = self.server.state
         if self.path == "/api/state":
             self._json(s.get_status_dict())
+        elif self.path.startswith("/screenshots/"):
+            self._serve_screenshot(s, self.path[len("/screenshots/"):])
         else:
             self._html(self._render(s))
+
+    def _serve_screenshot(self, s, filename):
+        # Sanitize filename to prevent path traversal
+        filename = os.path.basename(filename)
+        filepath = s.report_dir / "screenshots" / filename
+        if filepath.is_file():
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.end_headers()
+            with open(filepath, "rb") as f:
+                self.wfile.write(f.read())
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def do_POST(self):
         if self.path == "/api/command":
@@ -1048,6 +1104,9 @@ class DashHandler(BaseHTTPRequestHandler):
             det = f'<div class="detail">{it.result_detail[:150]}</div>' if it.result_detail else ""
             if it.how:
                 det += f'<div class="detail-how">{it.how[:120]}</div>'
+            if it.screenshot:
+                sc_name = os.path.basename(it.screenshot)
+                det += f'<div class="thumb"><a href="/screenshots/{sc_name}" target="_blank"><img src="/screenshots/{sc_name}" alt="screenshot"></a></div>'
             items += f'<div class="{css}" style="animation-delay:{i*0.03}s"><div class="it-h"><div class="it-n">{it.step_id}</div><div class="it-d">{it.description}</div><span class="badge {bc}">{bt}</span></div>{det}</div>'
 
         # Done banner with stats breakdown
@@ -1198,10 +1257,15 @@ def main():
     parser.add_argument("--login-url", default=None)
     parser.add_argument("--dashboard-port", type=int, default=9876)
     parser.add_argument("--no-dashboard", action="store_true")
+    parser.add_argument("--compare", default=None,
+                        help="Compare models: 'ollama:qwen3-coder:30b,nim:kimi-k2.5'")
     args = parser.parse_args()
 
     if not args.url:
         url, provider, model, ollama_url, creds, items = interactive_setup()
+        if args.compare:
+            _run_comparison(args, url, creds, items, ollama_url)
+            return
     else:
         url = args.url
         provider = args.provider
@@ -1218,12 +1282,100 @@ def main():
         if not items:
             items = generate_auto_checklist(url)
 
+        if args.compare:
+            _run_comparison(args, url, creds, items, ollama_url)
+            return
+
     if not args.report_dir:
         args.report_dir = f"tests/reports/qa-{datetime.now():%Y%m%d-%H%M%S}"
 
     run_agent(url, provider, model, items, args.report_dir,
               credentials=creds, dashboard_port=args.dashboard_port,
               no_dashboard=args.no_dashboard, ollama_url=ollama_url)
+
+
+def _run_comparison(args, url, creds, items, ollama_url):
+    """Run the same checklist with multiple models and generate a comparison report."""
+    models = []
+    for spec in args.compare.split(","):
+        spec = spec.strip()
+        if ":" in spec:
+            parts = spec.split(":", 1)
+            models.append((parts[0], parts[1]))
+        else:
+            models.append(("ollama", spec))
+
+    base_dir = args.report_dir or f"tests/reports/compare-{datetime.now():%Y%m%d-%H%M%S}"
+    Path(base_dir).mkdir(parents=True, exist_ok=True)
+
+    results = []  # list of (provider, model, state)
+    for prov, mod in models:
+        print(f"\n{'='*60}")
+        print(f"  COMPARISON RUN: {mod} ({prov})")
+        print(f"{'='*60}")
+        run_dir = f"{base_dir}/{prov}-{mod.replace('/', '-').replace(':', '-')}"
+        # Re-parse checklist for fresh items each run
+        fresh_items = []
+        if args.checklist and os.path.isfile(args.checklist):
+            with open(args.checklist) as f:
+                fresh_items = parse_checklist(f.read())
+        if not fresh_items:
+            fresh_items = generate_auto_checklist(url)
+
+        state = run_agent(url, prov, mod, fresh_items, run_dir,
+                          credentials=creds, no_dashboard=True,
+                          ollama_url=ollama_url)
+        results.append((prov, mod, state))
+
+    # Generate comparison report
+    _write_comparison_report(base_dir, results)
+
+
+def _write_comparison_report(base_dir, results):
+    """Generate a markdown comparison table from multiple runs."""
+    report_path = Path(base_dir) / "comparison.md"
+
+    # Build header
+    model_names = [f"{mod} ({prov})" for prov, mod, _ in results]
+    header = "| # | Step |" + "|".join(f" {m[:25]} " for m in model_names) + "|"
+    sep = "|---|------|" + "|".join("------" for _ in results) + "|"
+
+    # Build rows from first result's checklist (all have same items)
+    rows = []
+    first_checklist = results[0][2].checklist
+    for i, item in enumerate(first_checklist):
+        cells = []
+        for _, _, state in results:
+            st = state.checklist[i].status.upper() if i < len(state.checklist) else "?"
+            cells.append(st)
+        row = f"| {item.step_id} | {item.description[:40]} |" + "|".join(f" {c} " for c in cells) + "|"
+        rows.append(row)
+
+    # Summary row
+    summary_cells = []
+    for prov, mod, state in results:
+        c = state.counts()
+        elapsed = time.time() - state.start_time
+        summary_cells.append(f"{c['pass']}/{c['total']} ({int(elapsed)}s)")
+    summary = "| | **TOTAL** |" + "|".join(f" **{c}** " for c in summary_cells) + "|"
+
+    with open(report_path, "w") as f:
+        f.write(f"# Model Comparison Report\n\n")
+        f.write(f"**URL:** {results[0][2].url}\n")
+        f.write(f"**Date:** {datetime.now():%Y-%m-%d %H:%M}\n")
+        f.write(f"**Models:** {', '.join(model_names)}\n\n")
+        f.write(header + "\n")
+        f.write(sep + "\n")
+        for row in rows:
+            f.write(row + "\n")
+        f.write(summary + "\n")
+
+    print(f"\n{'='*60}")
+    print(f"  COMPARISON REPORT: {report_path}")
+    print(f"{'='*60}")
+    for prov, mod, state in results:
+        c = state.counts()
+        print(f"  {mod} ({prov}): {c['pass']}/{c['total']} PASS, {state.elapsed()}")
 
 
 if __name__ == "__main__":
