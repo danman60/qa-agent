@@ -630,6 +630,95 @@ def ask_llm(provider, model, snapshot, task, messages):
     return parse_response(response), mt, response
 
 
+def _try_token_injection(browser, state, credentials, login_url):
+    """Get a Supabase session token via API and inject into browser localStorage.
+    Returns True if injection succeeded and browser is now at dashboard."""
+    import urllib.request, json as _json
+    supabase_url = credentials.get("supabase_url", "")
+    service_key = credentials.get("supabase_service_key", "")
+    anon_key = credentials.get("supabase_anon_key", "")
+    session_file = credentials.get("supabase_session_file", "")
+    email = credentials.get("email", "")
+    password = credentials.get("password", "")
+    api_key = service_key or anon_key
+    if not supabase_url:
+        return False
+    state.log("  Token-injection login...", "action")
+    try:
+        # Option A: load pre-generated session from file
+        if session_file and os.path.isfile(session_file):
+            with open(session_file) as f:
+                token_data = _json.load(f)
+            state.log("  Using pre-generated session token", "result")
+        elif api_key and email and password:
+            # Option B: fetch token via API
+            req_data = _json.dumps({"email": email, "password": password}).encode()
+            headers = {"apikey": api_key, "Content-Type": "application/json"}
+            if service_key:
+                headers["Authorization"] = f"Bearer {service_key}"
+            req = urllib.request.Request(
+                f"{supabase_url}/auth/v1/token?grant_type=password",
+                data=req_data, headers=headers,
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                token_data = _json.loads(resp.read())
+        else:
+            return False
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            return False
+        session_payload = _json.dumps({
+            "access_token": access_token,
+            "refresh_token": token_data.get("refresh_token", ""),
+            "token_type": "bearer",
+            "expires_in": token_data.get("expires_in", 3600),
+            "expires_at": token_data.get("expires_at", 0),
+            "user": token_data.get("user", {}),
+        })
+        base_url = login_url.split("/login")[0]
+        domain = base_url.replace("https://", "").replace("http://", "")
+        ref = supabase_url.replace("https://", "").split(".")[0]
+        cookie_name = f"sb-{ref}-auth-token"
+        # Supabase SSR uses cookies (not just localStorage). Set the session cookie.
+        # The cookie value is the session JSON, URL-encoded.
+        import urllib.parse as _urlparse
+        cookie_value = _urlparse.quote(session_payload)
+        # Navigate to login page first to set cookies on the correct domain
+        browser.page.goto(login_url, wait_until="domcontentloaded")
+        browser.context.add_cookies([{
+            "name": cookie_name,
+            "value": cookie_value,
+            "domain": domain,
+            "path": "/",
+            "httpOnly": False,
+            "secure": True,
+            "sameSite": "Lax",
+        }])
+        # Also set in localStorage as fallback for client-side Supabase
+        browser.page.evaluate(f"localStorage.setItem('sb-{ref}-auth-token', {_json.dumps(session_payload)});")
+        # Navigate to dashboard — server middleware should now see the cookie
+        browser.page.goto(base_url + "/dashboard", wait_until="domcontentloaded")
+        time.sleep(3)
+        if "/login" not in browser.url:
+            state.log(f"  Token-injection succeeded: {browser.url}", "result")
+            return True
+        # App may have cleared the token — try waiting longer
+        try:
+            browser.page.wait_for_url(lambda u: "/login" not in u, timeout=8000)
+            state.log(f"  Token-injection succeeded after wait: {browser.url}", "result")
+            return True
+        except Exception:
+            pass
+    except Exception as e:
+        import urllib.error as _ue
+        detail = ""
+        if isinstance(e, _ue.HTTPError):
+            try: detail = e.read().decode()[:150]
+            except Exception: pass
+        state.log(f"  Token-injection failed: {e} {detail}", "error")
+    return False
+
+
 def do_login(browser, state, credentials):
     """Deterministic harness-enforced login. No LLM needed."""
     email = credentials.get("email", "")
@@ -640,6 +729,15 @@ def do_login(browser, state, credentials):
         return True  # No creds, skip login
 
     state.log(f"Logging in as {email}...", "action")
+
+    # Try token injection first if Supabase credentials provided (avoids form rate limits)
+    if credentials.get("supabase_url") and (credentials.get("supabase_service_key") or credentials.get("supabase_anon_key") or credentials.get("supabase_session_file")):
+        if _try_token_injection(browser, state, credentials, login_url):
+            state.log(f"Login succeeded (token injection): {browser.url}", "success")
+            state.pages_visited.add(browser.url)
+            return True
+        state.log("  Token injection failed, falling back to form login...", "warn")
+
     browser.goto(login_url)
 
     # Fill email — try multiple selectors
@@ -675,20 +773,45 @@ def do_login(browser, state, credentials):
         except Exception:
             continue
 
-    # Wait for redirect
+    # Wait for redirect OR page content change (some apps don't redirect)
     try:
-        browser.page.wait_for_url(lambda u: "/login" not in u, timeout=10000)
+        browser.page.wait_for_url(lambda u: "/login" not in u, timeout=20000)
     except PWTimeout:
-        pass
+        # URL didn't change — check if page content changed (SPA login)
+        time.sleep(5)
 
-    # Verify
+    state.log(f"  Post-login URL: {browser.url}", "result")
+
+    # Verify: check URL first, then check for dashboard/nav content
     if "/login" not in browser.url:
         state.log(f"Login succeeded: {browser.url}", "success")
         state.pages_visited.add(browser.url)
         return True
-    else:
-        state.log(f"Login failed — still at {browser.url}", "error")
-        return False
+
+    # SPA fallback: URL may stay at /login but content changes
+    # Check if a sidebar/nav appeared (sign of authenticated state)
+    try:
+        snap = browser.snapshot()
+        # Look for navigation elements that only appear after login
+        has_sidebar = bool(browser.page.locator('nav').count()) or 'navigation' in snap.lower()
+        has_dashboard_link = 'link "Dashboard"' in snap or 'link "Home"' in snap
+        if has_sidebar and has_dashboard_link:
+            # Navigate to dashboard explicitly
+            try:
+                browser.page.get_by_role("link", name="Dashboard").first.click()
+                time.sleep(2)
+                state.log(f"Login succeeded (SPA → navigated to dashboard): {browser.url}", "success")
+                state.pages_visited.add(browser.url)
+                return True
+            except Exception:
+                state.log(f"Login succeeded (SPA, URL unchanged): {browser.url}", "success")
+                state.pages_visited.add(browser.url)
+                return True
+    except Exception:
+        pass
+
+    state.log(f"Login failed — still at {browser.url}", "error")
+    return False
 
 
 def execute_checklist_item(browser, item, state, provider, model, messages):
@@ -1296,6 +1419,10 @@ def main():
     parser.add_argument("--email", default=None)
     parser.add_argument("--password", default=None)
     parser.add_argument("--login-url", default=None)
+    parser.add_argument("--supabase-url", default=None, help="Supabase project URL for token-injection fallback")
+    parser.add_argument("--supabase-anon-key", default=None, help="Supabase anon key for token-injection fallback")
+    parser.add_argument("--supabase-service-key", default=None, help="Supabase service role key (bypasses rate limits)")
+    parser.add_argument("--supabase-session-file", default=None, help="Path to pre-generated session JSON file (skips login form entirely)")
     parser.add_argument("--dashboard-port", type=int, default=9876)
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument("--visual", action="store_true",
@@ -1318,6 +1445,14 @@ def main():
         if args.email:
             creds = {"email": args.email, "password": args.password or "",
                      "login_url": args.login_url or url.rstrip("/") + "/login"}
+            if args.supabase_url:
+                creds["supabase_url"] = args.supabase_url
+            if args.supabase_anon_key:
+                creds["supabase_anon_key"] = args.supabase_anon_key
+            if args.supabase_service_key:
+                creds["supabase_service_key"] = args.supabase_service_key
+            if args.supabase_session_file:
+                creds["supabase_session_file"] = args.supabase_session_file
         items = []
         if args.checklist and os.path.isfile(args.checklist):
             with open(args.checklist) as f:
