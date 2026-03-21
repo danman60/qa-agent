@@ -900,35 +900,95 @@ def run_agent(url, provider, model, checklist_items, report_dir,
 # ═══════════════════════════════════════════════════════════════════
 
 DASH_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-:root{--blue:#3b82f6;--blue-light:#eff6ff;--pass:#22c55e;--fail:#ef4444;--error:#f59e0b;--bg:#f8fafc;--card:#fff;--text:#0f172a;--muted:#64748b;--border:#e2e8f0}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+:root{
+  --blue:#3b82f6;--blue-dark:#1d4ed8;--blue-light:#eff6ff;--blue-50:#f0f7ff;
+  --pass:#22c55e;--pass-bg:#f0fdf4;--fail:#ef4444;--fail-bg:#fef2f2;
+  --error:#f59e0b;--error-bg:#fef3c7;
+  --bg:#f1f5f9;--card:#fff;--text:#0f172a;--muted:#64748b;--border:#e2e8f0;
+  --shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:0 4px 6px rgba(0,0,0,.05),0 2px 4px rgba(0,0,0,.04);
+}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);font-size:14px}
-.hdr{background:linear-gradient(135deg,var(--blue),#1d4ed8);color:#fff;padding:1rem 1.5rem;position:sticky;top:0;z-index:100}
-.hdr h1{font-size:1.2rem;font-weight:700}
-.hdr .sub{font-size:.78rem;opacity:.9;margin-top:.1rem}
-.pbar{margin-top:.5rem;background:rgba(255,255,255,.2);border-radius:99px;height:8px;overflow:hidden;max-width:500px}
-.pbar-fill{height:100%;border-radius:99px;background:#fff;transition:width .4s}
-.stats{display:flex;gap:1rem;margin-top:.3rem;font-size:.75rem;opacity:.9;flex-wrap:wrap}
-.ctl{display:flex;gap:.4rem;padding:.5rem 1rem;background:#fff;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.ctl button{padding:.35rem .65rem;border-radius:6px;border:1px solid var(--border);background:#fff;font-size:.75rem;cursor:pointer}
-.ctl button:hover{background:var(--blue-light);border-color:var(--blue)}
-.ctl .danger{color:var(--fail)}
-.wrap{max-width:900px;margin:0 auto;padding:1rem}
-.it{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:.5rem;padding:.7rem .9rem}
-.it.running{border-color:var(--blue);border-width:2px;background:var(--blue-light)}
-.it.pass{border-left:4px solid var(--pass)}
-.it.fail,.it.error{border-left:4px solid var(--fail)}
-.it.skip{opacity:.6}
-.it-h{display:flex;align-items:center;gap:.5rem;font-size:.85rem}
-.it-n{width:24px;height:24px;border-radius:6px;background:var(--blue-light);color:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.7rem;flex-shrink:0}
-.it-d{font-weight:600;flex:1}
-.badge{padding:.1rem .45rem;border-radius:99px;font-size:.6rem;font-weight:700;text-transform:uppercase}
-.b-pass{background:#dcfce7;color:#16a34a}.b-fail{background:#fef2f2;color:#dc2626}.b-err{background:#fef3c7;color:#92400e}.b-run{background:var(--blue-light);color:var(--blue);animation:pulse 1.5s infinite}.b-pend{background:#f1f5f9;color:var(--muted)}.b-skip{background:#f1f5f9;color:var(--muted)}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+
+/* Header */
+.hdr{background:linear-gradient(135deg,var(--blue) 0%,var(--blue-dark) 50%,#1e3a8a 100%);color:#fff;padding:1.25rem 1.5rem 1rem;position:sticky;top:0;z-index:100;box-shadow:0 4px 20px rgba(59,130,246,.25)}
+.hdr h1{font-size:1.3rem;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:.4rem}
+.hdr .sub{font-size:.78rem;opacity:.85;margin-top:.2rem;font-family:'JetBrains Mono',monospace;letter-spacing:-.02em}
+.pbar{margin-top:.6rem;background:rgba(255,255,255,.15);border-radius:99px;height:6px;overflow:hidden;max-width:500px;backdrop-filter:blur(4px)}
+.pbar-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#86efac,#fff);transition:width .6s cubic-bezier(.4,0,.2,1)}
+.pbar-label{font-size:.7rem;opacity:.8;margin-top:.2rem;font-family:'JetBrains Mono',monospace}
+.stats{display:flex;gap:.6rem;margin-top:.5rem;font-size:.72rem;flex-wrap:wrap}
+.stat{background:rgba(255,255,255,.12);padding:.25rem .6rem;border-radius:6px;backdrop-filter:blur(4px);display:flex;align-items:center;gap:.25rem}
+.stat b{font-weight:700;font-size:.82rem;font-family:'JetBrains Mono',monospace}
+
+/* Controls */
+.ctl{display:flex;align-items:center;gap:.5rem;padding:.6rem 1.5rem;background:var(--card);border-bottom:1px solid var(--border);box-shadow:var(--shadow)}
+.ctl button{padding:.4rem .85rem;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:.78rem;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease}
+.ctl button:hover{background:var(--blue-light);border-color:var(--blue);transform:translateY(-1px);box-shadow:var(--shadow)}
+.ctl button:active{transform:translateY(0)}
+.ctl .danger{color:var(--fail);border-color:#fecaca}
+.ctl .danger:hover{background:var(--fail-bg);border-color:var(--fail)}
+.ctl-sep{width:1px;height:20px;background:var(--border);margin:0 .2rem}
+
+/* Content */
+.wrap{max-width:920px;margin:0 auto;padding:1.25rem 1rem 3rem}
+
+/* Checklist items */
+.it{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:.5rem;padding:.75rem 1rem;box-shadow:var(--shadow);transition:all .2s ease;animation:fadeSlideIn .3s ease both}
+.it:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.it.running{border-color:var(--blue);border-width:2px;background:var(--blue-50);box-shadow:0 0 0 3px rgba(59,130,246,.1),var(--shadow-md);animation:fadeSlideIn .3s ease both,glowPulse 2s ease-in-out infinite}
+.it.pass{border-left:4px solid var(--pass);background:linear-gradient(90deg,var(--pass-bg) 0%,var(--card) 8%)}
+.it.fail,.it.error{border-left:4px solid var(--fail);background:linear-gradient(90deg,var(--fail-bg) 0%,var(--card) 8%)}
+.it.skip{opacity:.5}
+.it-h{display:flex;align-items:center;gap:.6rem;font-size:.85rem}
+.it-n{width:28px;height:28px;border-radius:8px;background:var(--blue-light);color:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.it.pass .it-n{background:var(--pass-bg);color:var(--pass)}
+.it.fail .it-n,.it.error .it-n{background:var(--fail-bg);color:var(--fail)}
+.it-d{font-weight:600;flex:1;line-height:1.3}
+.badge{padding:.2rem .55rem;border-radius:99px;font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+.b-pass{background:#dcfce7;color:#16a34a}
+.b-fail{background:#fef2f2;color:#dc2626}
+.b-err{background:#fef3c7;color:#92400e}
+.b-run{background:var(--blue-light);color:var(--blue);animation:pulse 1.5s infinite}
+.b-pend{background:#f1f5f9;color:#cbd5e1;font-size:.55rem}
+.b-skip{background:#f1f5f9;color:var(--muted)}
+
+/* Animations */
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.detail{font-size:.78rem;color:var(--muted);margin-top:.25rem}
-.sec-h{font-weight:700;font-size:.85rem;margin:1rem 0 .4rem;color:var(--blue);border-bottom:1px solid var(--border);padding-bottom:.2rem}
-.done{background:#dcfce7;border:2px solid #16a34a;border-radius:8px;padding:.8rem;text-align:center;margin-bottom:1rem;font-weight:600;color:#16a34a}
+@keyframes fadeSlideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 0 3px rgba(59,130,246,.1),var(--shadow-md)}50%{box-shadow:0 0 0 6px rgba(59,130,246,.15),var(--shadow-md)}}
+@keyframes checkIn{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes confetti{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+
+/* Details */
+.detail{font-size:.78rem;color:#475569;margin-top:.3rem;line-height:1.4}
+.detail-how{font-size:.75rem;color:var(--muted);margin-top:.15rem;font-style:italic}
+
+/* Section headers */
+.sec-h{font-weight:700;font-size:.82rem;margin:1.25rem 0 .5rem;color:var(--blue-dark);padding:.4rem .75rem;background:var(--blue-light);border-radius:8px;display:flex;align-items:center;gap:.4rem;letter-spacing:-.01em}
+.sec-h::before{content:'';width:3px;height:16px;background:var(--blue);border-radius:2px}
+
+/* Done banner */
+.done{background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);border:2px solid #86efac;border-radius:12px;padding:1.2rem;text-align:center;margin-bottom:1.25rem;font-weight:700;color:#15803d;font-size:1rem;box-shadow:0 4px 12px rgba(34,197,94,.15);animation:fadeSlideIn .5s ease}
+.done .done-stats{display:flex;justify-content:center;gap:1.5rem;margin-top:.5rem;font-size:.85rem;font-weight:500}
+.done .done-stat{display:flex;align-items:center;gap:.3rem}
+.done .done-stat b{font-family:'JetBrains Mono',monospace;font-size:1.1rem}
+
+/* Responsive */
+@media(max-width:640px){
+  .hdr{padding:.8rem 1rem}
+  .hdr h1{font-size:1.1rem}
+  .stats{gap:.4rem}
+  .stat{padding:.2rem .4rem;font-size:.65rem}
+  .ctl{padding:.5rem .75rem;gap:.3rem}
+  .ctl button{padding:.3rem .5rem;font-size:.7rem}
+  .wrap{padding:.75rem .5rem}
+  .it{padding:.6rem .75rem;border-radius:8px}
+  .it-d{font-size:.8rem}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 """
 
 class DashHandler(BaseHTTPRequestHandler):
@@ -985,22 +1045,47 @@ class DashHandler(BaseHTTPRequestHandler):
                 css = "it running"
             bc = {"pass":"b-pass","fail":"b-fail","error":"b-err","skip":"b-skip","running":"b-run"}.get(it.status, "b-pend")
             bt = it.status.upper() if it.status != "pending" else "..."
-            det = f'<div class="detail">{it.result_detail[:120]}</div>' if it.result_detail else ""
+            det = f'<div class="detail">{it.result_detail[:150]}</div>' if it.result_detail else ""
             if it.how:
-                det += f'<div class="detail" style="font-style:italic">{it.how[:100]}</div>'
-            items += f'<div class="{css}"><div class="it-h"><div class="it-n">{it.step_id}</div><div class="it-d">{it.description[:60]}</div><span class="badge {bc}">{bt}</span></div>{det}</div>'
+                det += f'<div class="detail-how">{it.how[:120]}</div>'
+            items += f'<div class="{css}" style="animation-delay:{i*0.03}s"><div class="it-h"><div class="it-n">{it.step_id}</div><div class="it-d">{it.description}</div><span class="badge {bc}">{bt}</span></div>{det}</div>'
 
-        done_b = f'<div class="done">Complete | {c["pass"]} passed, {c["fail"]} failed | {s.elapsed()}</div>' if not s.running else ""
+        # Done banner with stats breakdown
+        done_b = ""
+        if not s.running:
+            pass_icon = "&#10003;" if c["fail"] == 0 else "&#9888;"
+            done_b = f'''<div class="done">{pass_icon} Testing Complete
+<div class="done-stats">
+<span class="done-stat"><b>{c["pass"]}</b> passed</span>
+<span class="done-stat"><b>{c["fail"]}</b> failed</span>
+<span class="done-stat"><b>{s.elapsed()}</b></span>
+</div></div>'''
 
-        return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QA Agent</title><meta http-equiv="refresh" content="2"><style>{DASH_CSS}</style></head><body>
-<div class="hdr"><h1>{live}QA Agent {status}</h1><div class="sub">{s.url} | {s.model} ({s.provider}) | {s.elapsed()}</div>
+        # Stats with pill styling
+        stat = lambda label, val: f'<span class="stat"><b>{val}</b> {label}</span>'
+        stats_html = (
+            stat("pass", c["pass"]) + stat("fail", c["fail"]) + stat("err", c["error"]) +
+            stat("total", c["total"]) + stat("pages", len(s.pages_visited)) +
+            stat("console", len(s.all_console_errors)) + stat("network", len(s.all_network_errors))
+        )
+
+        return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QA Agent — {status}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>">
+<meta http-equiv="refresh" content="2"><style>{DASH_CSS}</style></head><body>
+<div class="hdr">
+<h1>{live}QA Agent <span style="font-weight:400;opacity:.85">{status}</span></h1>
+<div class="sub">{s.url} &middot; {s.model} ({s.provider}) &middot; {s.elapsed()}</div>
 <div class="pbar"><div class="pbar-fill" style="width:{done_pct}%"></div></div>
-<div class="stats"><span><b>{c['pass']}</b> pass</span><span><b>{c['fail']}</b> fail</span><span><b>{c['error']}</b> err</span><span><b>{c['total']}</b> total</span><span><b>{len(s.pages_visited)}</b> pages</span><span><b>{len(s.all_console_errors)}</b> console</span><span><b>{len(s.all_network_errors)}</b> network</span></div></div>
+<div class="pbar-label">{done_pct}% complete</div>
+<div class="stats">{stats_html}</div>
+</div>
 <div class="ctl">
-<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'pause'}})}})">Pause</button>
-<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'resume'}})}})">Resume</button>
-<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'skip'}})}})">Skip</button>
-<button class="danger" onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'stop'}})}})">Stop</button>
+<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'pause'}})}})">&#9208; Pause</button>
+<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'resume'}})}})">&#9654; Resume</button>
+<span class="ctl-sep"></span>
+<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'skip'}})}})">&#9197; Skip</button>
+<button class="danger" onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'stop'}})}})">&#9632; Stop</button>
 </div>
 <div class="wrap">{done_b}{items}</div>
 <script>window.addEventListener('load',function(){{var e=document.querySelector('.it.running');if(e)e.scrollIntoView({{behavior:'smooth',block:'center'}});}});</script></body></html>"""
