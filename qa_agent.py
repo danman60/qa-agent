@@ -375,17 +375,21 @@ def llm_chat(provider, model, messages, max_tokens=300):
 class Browser:
     """Wraps Playwright Python API. All browser interaction goes through here."""
 
-    def __init__(self):
+    def __init__(self, visual=False):
         self.pw = None
         self.browser = None
         self.context = None
         self.page = None
         self.console_errors = []
         self.network_errors = []
+        self.visual = visual
 
     def launch(self):
         self.pw = sync_playwright().start()
-        self.browser = self.pw.chromium.launch(headless=True)
+        launch_opts = {"headless": not self.visual}
+        if self.visual:
+            launch_opts["slow_mo"] = 300  # 300ms between actions for visibility
+        self.browser = self.pw.chromium.launch(**launch_opts)
         self.context = self.browser.new_context(
             viewport={"width": 1280, "height": 720},
             user_agent="QA-Agent/1.0",
@@ -426,10 +430,28 @@ class Browser:
         """Take and auto-resize screenshot."""
         self.page.screenshot(path=path, full_page=False)
 
+    def _highlight(self, locator):
+        """Flash a red border around element before interacting (visual mode only)."""
+        if not self.visual:
+            return
+        try:
+            locator.scroll_into_view_if_needed(timeout=2000)
+            locator.evaluate("""el => {
+                el.style.outline = '3px solid #ef4444';
+                el.style.outlineOffset = '2px';
+                el.style.transition = 'outline 0.2s ease';
+                setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 1200);
+            }""")
+            time.sleep(0.4)
+        except Exception:
+            pass
+
     def fill(self, role, name, value):
         """Fill a form field by role and name."""
         try:
-            self.page.get_by_role(role, name=name).fill(value, timeout=5000)
+            el = self.page.get_by_role(role, name=name)
+            self._highlight(el)
+            el.fill(value, timeout=5000)
             return True, "filled"
         except Exception as e:
             return False, str(e)[:200]
@@ -437,7 +459,9 @@ class Browser:
     def click(self, role, name):
         """Click an element by role and name."""
         try:
-            self.page.get_by_role(role, name=name).click(timeout=5000)
+            el = self.page.get_by_role(role, name=name)
+            self._highlight(el)
+            el.click(timeout=5000)
             time.sleep(0.5)
             return True, "clicked"
         except Exception as e:
@@ -446,7 +470,9 @@ class Browser:
     def click_text(self, text):
         """Click by visible text (fallback)."""
         try:
-            self.page.get_by_text(text, exact=True).first.click(timeout=5000)
+            el = self.page.get_by_text(text, exact=True).first
+            self._highlight(el)
+            el.click(timeout=5000)
             time.sleep(0.5)
             return True, "clicked"
         except Exception as e:
@@ -470,7 +496,9 @@ class Browser:
     def select_option(self, role, name, value):
         """Select from a dropdown."""
         try:
-            self.page.get_by_role(role, name=name).select_option(value, timeout=5000)
+            el = self.page.get_by_role(role, name=name)
+            self._highlight(el)
+            el.select_option(value, timeout=5000)
             return True, f"selected {value}"
         except Exception as e:
             return False, str(e)[:200]
@@ -749,9 +777,11 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
             # Tight verdict: fail words checked FIRST, then require positive evidence
             FAIL_PHRASES = ["not visible", "not found", "no data", "not present",
                             "may still", "couldn't", "can't find", "cannot find",
-                            "empty", "missing", "error", "failed", "unable",
+                            "cannot ", "empty", "missing", "error", "failed", "unable",
                             "not loaded", "not showing", "no table", "no content",
-                            "doesn't show", "does not show", "not displayed"]
+                            "doesn't show", "does not show", "not displayed",
+                            "still shows login", "has not loaded", "not logged in",
+                            "login screen", "login page"]
             PASS_PHRASES = ["shows", "displays", "contains", "loaded with",
                             "visible with", "confirmed", "verified", "present",
                             "working correctly", "page shows", "table shows",
@@ -782,8 +812,10 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
                 reasoning = action.get("reasoning", "").lower()
                 FAIL_PHRASES = ["not visible", "not found", "no data", "not present",
                                 "may still", "couldn't", "can't find", "cannot find",
-                                "empty", "missing", "error", "failed", "unable",
-                                "not loaded", "not showing", "no table", "no content"]
+                                "cannot ", "empty", "missing", "error", "failed", "unable",
+                                "not loaded", "not showing", "no table", "no content",
+                                "still shows login", "has not loaded", "not logged in",
+                                "login screen", "login page"]
                 if any(p in reasoning for p in FAIL_PHRASES):
                     last_result = f"VERIFY negative: {detail[:150]}"
                     continue
@@ -867,7 +899,8 @@ def run_harness_checks(browser, state):
 # ═══════════════════════════════════════════════════════════════════
 
 def run_agent(url, provider, model, checklist_items, report_dir,
-              credentials=None, dashboard_port=9876, no_dashboard=False, ollama_url=None):
+              credentials=None, dashboard_port=9876, no_dashboard=False, ollama_url=None,
+              visual=False):
     if ollama_url:
         global OLLAMA_URL
         OLLAMA_URL = ollama_url
@@ -889,16 +922,18 @@ def run_agent(url, provider, model, checklist_items, report_dir,
             state.log(f"Dashboard failed: {e}", "warn")
 
     # Launch browser
-    browser = Browser()
+    browser = Browser(visual=visual)
     browser.launch()
     state.log("Browser launched", "success")
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     # Login
+    login_ok = True
     if credentials and credentials.get("email"):
         if not do_login(browser, state, credentials):
-            state.log("Login failed — continuing anyway", "warn")
+            state.log("Login FAILED — skipping all items that require auth", "error")
+            login_ok = False
     else:
         browser.goto(url)
         state.pages_visited.add(url)
@@ -908,6 +943,12 @@ def run_agent(url, provider, model, checklist_items, report_dir,
         state.current_item_idx = idx
         if state.stopped:
             item.status = "skip"
+            continue
+        # Skip all items after login failure (except first item which tests login itself)
+        if not login_ok and idx > 0:
+            item.status = "skip"
+            item.result_detail = "Skipped: login prerequisite failed"
+            state.log(f"  SKIP: {item.description} (login failed)", "warn")
             continue
         execute_checklist_item(browser, item, state, provider, model, messages)
 
@@ -1257,6 +1298,8 @@ def main():
     parser.add_argument("--login-url", default=None)
     parser.add_argument("--dashboard-port", type=int, default=9876)
     parser.add_argument("--no-dashboard", action="store_true")
+    parser.add_argument("--visual", action="store_true",
+                        help="Headed browser with element highlights and slow_mo (watch it work)")
     parser.add_argument("--compare", default=None,
                         help="Compare models: 'ollama:qwen3-coder:30b,nim:kimi-k2.5'")
     args = parser.parse_args()
@@ -1291,7 +1334,8 @@ def main():
 
     run_agent(url, provider, model, items, args.report_dir,
               credentials=creds, dashboard_port=args.dashboard_port,
-              no_dashboard=args.no_dashboard, ollama_url=ollama_url)
+              no_dashboard=args.no_dashboard, ollama_url=ollama_url,
+              visual=args.visual)
 
 
 def _run_comparison(args, url, creds, items, ollama_url):
