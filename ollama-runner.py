@@ -322,10 +322,65 @@ def nim_chat(model, messages, tools=None):
     }
 
 
+def openai_chat(host, model, messages, tools=None):
+    """Call any OpenAI-compatible endpoint (llama-server, etc) with tool support."""
+    url = f"{host}/v1/chat/completions"
+    payload = {
+        "model": model or "local",
+        "messages": messages,
+        "max_tokens": 4096,
+    }
+    if tools:
+        payload["tools"] = tools
+
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data,
+                                headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            result = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:500]
+        return {"error": f"HTTP {e.code}: {body}"}
+    except urllib.error.URLError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": str(e)}
+
+    if "error" in result:
+        return result
+    choice = result.get("choices", [{}])[0]
+    msg = choice.get("message", {})
+    tool_calls = msg.get("tool_calls", []) or []
+    normalized_calls = []
+    for tc in tool_calls:
+        fn = tc.get("function", {})
+        args = fn.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+        normalized_calls.append({
+            "id": tc.get("id", ""),
+            "function": {"name": fn.get("name", ""), "arguments": args}
+        })
+    return {
+        "message": {
+            "role": "assistant",
+            "content": msg.get("content", "") or "",
+            "tool_calls": normalized_calls if normalized_calls else []
+        },
+        "_raw_message": msg
+    }
+
+
 def llm_chat(provider, model, host, messages, tools=None):
     """Route to the right chat API based on provider."""
     if provider == "nim":
         return nim_chat(model, messages, tools)
+    elif provider == "llama-server":
+        return openai_chat(host, model, messages, tools)
     else:
         return ollama_chat(host, model, messages, tools)
 
@@ -539,7 +594,7 @@ def main():
     parser = argparse.ArgumentParser(description="Local LLM Task Runner")
     parser.add_argument("task", help="Path to task .md file")
     parser.add_argument("--model", default=None)
-    parser.add_argument("--provider", choices=["ollama", "nim"], default="ollama")
+    parser.add_argument("--provider", choices=["ollama", "nim", "llama-server"], default="ollama")
     parser.add_argument("--host", default=DEFAULT_HOST)
     args = parser.parse_args()
 
@@ -551,6 +606,11 @@ def main():
     if args.provider == "nim":
         model = args.model or NIM_MODEL
         host = NIM_URL
+    elif args.provider == "llama-server":
+        model = args.model or "llama-3.1-70b"
+        host = args.host
+        if not host.startswith("http"):
+            host = f"http://{host}"
     else:
         model = args.model or DEFAULT_MODEL
         host = args.host
