@@ -1148,11 +1148,12 @@ def run_agent(url, provider, model, checklist_items, report_dir,
     browser.close()
 
     if dashboard:
-        state.log("Dashboard running. Ctrl+C to exit.", "info")
+        state.log(f"Dashboard running at port {dashboard_port}. Ctrl+C to exit.", "info")
+        state.log(f"View: http://100.122.177.91:{dashboard_port} (Tailscale)", "info")
         try:
             while True:
                 time.sleep(1)
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
             dashboard.shutdown()
 
     return state
