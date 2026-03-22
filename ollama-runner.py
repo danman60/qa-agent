@@ -284,18 +284,20 @@ def nim_chat(model, messages, tools=None):
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:500]
+        return {"error": f"HTTP {e.code}: {body}"}
     except urllib.error.URLError as e:
         return {"error": str(e)}
     except Exception as e:
         return {"error": str(e)}
 
-    # Normalize OpenAI format → ollama format
     if "error" in result:
         return result
     choice = result.get("choices", [{}])[0]
     msg = choice.get("message", {})
-    # OpenAI tool_calls have arguments as JSON string, ollama has them as dict
-    tool_calls = msg.get("tool_calls", [])
+    # Parse tool_calls — keep raw for history, normalize for execution
+    tool_calls = msg.get("tool_calls", []) or []
     normalized_calls = []
     for tc in tool_calls:
         fn = tc.get("function", {})
@@ -314,7 +316,9 @@ def nim_chat(model, messages, tools=None):
             "role": "assistant",
             "content": msg.get("content", "") or "",
             "tool_calls": normalized_calls if normalized_calls else []
-        }
+        },
+        # Keep raw message for appending to history (NIM expects its own format back)
+        "_raw_message": msg
     }
 
 
@@ -440,8 +444,9 @@ Rules:
         content = msg.get("content", "")
         tool_calls = msg.get("tool_calls", [])
 
-        # Add assistant response to history
-        messages.append(msg)
+        # Add assistant response to history (use raw format for NIM compatibility)
+        raw_msg = resp.get("_raw_message", msg)
+        messages.append(raw_msg)
 
         # If there's text content, log it
         if content:
