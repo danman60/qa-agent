@@ -25,6 +25,9 @@ from pathlib import Path
 
 DEFAULT_MODEL = "qwen3-coder:30b"
 DEFAULT_HOST = "http://100.75.112.14:11434"  # FIRMAMENT
+NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NIM_KEY = os.environ.get("NIM_API_KEY", "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")
+NIM_MODEL = "moonshotai/kimi-k2.5"
 MAX_TURNS = 50
 MAX_TOOL_ERRORS = 5
 
@@ -263,6 +266,66 @@ def ollama_chat(host, model, messages, tools=None):
     except Exception as e:
         return {"error": str(e)}
 
+def nim_chat(model, messages, tools=None):
+    """Call NIM (OpenAI-compatible) /v1/chat/completions with tool support."""
+    payload = {
+        "model": model or NIM_MODEL,
+        "messages": messages,
+        "max_tokens": 4096,
+    }
+    if tools:
+        payload["tools"] = tools
+
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(NIM_URL, data=data, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {NIM_KEY}",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read())
+    except urllib.error.URLError as e:
+        return {"error": str(e)}
+    except Exception as e:
+        return {"error": str(e)}
+
+    # Normalize OpenAI format → ollama format
+    if "error" in result:
+        return result
+    choice = result.get("choices", [{}])[0]
+    msg = choice.get("message", {})
+    # OpenAI tool_calls have arguments as JSON string, ollama has them as dict
+    tool_calls = msg.get("tool_calls", [])
+    normalized_calls = []
+    for tc in tool_calls:
+        fn = tc.get("function", {})
+        args = fn.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+        normalized_calls.append({
+            "id": tc.get("id", ""),
+            "function": {"name": fn.get("name", ""), "arguments": args}
+        })
+    return {
+        "message": {
+            "role": "assistant",
+            "content": msg.get("content", "") or "",
+            "tool_calls": normalized_calls if normalized_calls else []
+        }
+    }
+
+
+def llm_chat(provider, model, host, messages, tools=None):
+    """Route to the right chat API based on provider."""
+    if provider == "nim":
+        return nim_chat(model, messages, tools)
+    else:
+        return ollama_chat(host, model, messages, tools)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Status File (for Opus to monitor)
 # ═══════════════════════════════════════════════════════════════════
@@ -322,12 +385,14 @@ def check_context_injection(task_file):
 # Main Runner Loop
 # ═══════════════════════════════════════════════════════════════════
 
-def run(task_file, model, host):
+def run(task_file, model, host, provider="ollama"):
     task = Path(task_file).read_text()
     status = StatusWriter(task_file)
 
+    status.log(f"Provider: {provider}")
     status.log(f"Model: {model}")
-    status.log(f"Host: {host}")
+    if provider != "nim":
+        status.log(f"Host: {host}")
     status.log(f"Task: {task_file}")
 
     system = """You are a coding assistant executing a task. You have tools to read files, write files, edit files, run bash commands, and grep for patterns.
@@ -358,8 +423,8 @@ Rules:
             status.log(f"INJECTED CONTEXT from supervisor")
             messages.append({"role": "user", "content": f"[SUPERVISOR CONTEXT]: {injected}"})
 
-        # Call ollama
-        resp = ollama_chat(host, model, messages, tools=TOOLS)
+        # Call LLM (ollama or NIM)
+        resp = llm_chat(provider, model, host, messages, tools=TOOLS)
 
         if "error" in resp:
             status.log(f"OLLAMA ERROR: {resp['error']}")
@@ -468,7 +533,8 @@ Rules:
 def main():
     parser = argparse.ArgumentParser(description="Local LLM Task Runner")
     parser.add_argument("task", help="Path to task .md file")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--provider", choices=["ollama", "nim"], default="ollama")
     parser.add_argument("--host", default=DEFAULT_HOST)
     args = parser.parse_args()
 
@@ -476,19 +542,27 @@ def main():
         print(f"ERROR: task file not found: {args.task}")
         sys.exit(1)
 
-    host = args.host
-    if not host.startswith("http"):
-        host = f"http://{host}"
+    # Set defaults based on provider
+    if args.provider == "nim":
+        model = args.model or NIM_MODEL
+        host = NIM_URL
+    else:
+        model = args.model or DEFAULT_MODEL
+        host = args.host
+        if not host.startswith("http"):
+            host = f"http://{host}"
 
     print(f"\n{'='*50}")
-    print(f"  ollama-runner — Local LLM Task Executor")
+    print(f"  ollama-runner — LLM Task Executor")
     print(f"{'='*50}")
-    print(f"  Model: {args.model}")
-    print(f"  Host:  {host}")
+    print(f"  Provider: {args.provider}")
+    print(f"  Model: {model}")
+    if args.provider != "nim":
+        print(f"  Host:  {host}")
     print(f"  Task:  {args.task}")
     print(f"{'='*50}\n")
 
-    run(args.task, args.model, host)
+    run(args.task, model, host, provider=args.provider)
 
 
 if __name__ == "__main__":
