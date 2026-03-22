@@ -1101,96 +1101,131 @@ def run_agent(url, provider, model, checklist_items, report_dir,
 # ═══════════════════════════════════════════════════════════════════
 
 DASH_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 :root{
   --blue:#3b82f6;--blue-dark:#1d4ed8;--blue-light:#eff6ff;--blue-50:#f0f7ff;
-  --pass:#22c55e;--pass-bg:#f0fdf4;--fail:#ef4444;--fail-bg:#fef2f2;
+  --pass:#10b981;--pass-bg:#ecfdf5;--pass-border:#6ee7b7;
+  --fail:#ef4444;--fail-bg:#fef2f2;--fail-border:#fca5a5;
   --error:#f59e0b;--error-bg:#fef3c7;
-  --bg:#f1f5f9;--card:#fff;--text:#0f172a;--muted:#64748b;--border:#e2e8f0;
-  --shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
-  --shadow-md:0 4px 6px rgba(0,0,0,.05),0 2px 4px rgba(0,0,0,.04);
+  --skip-text:#94a3b8;
+  --bg:#0f172a;--bg-card:#1e293b;--bg-surface:#334155;
+  --text:#f1f5f9;--text-secondary:#94a3b8;--muted:#64748b;
+  --border:#334155;--border-light:#475569;
+  --shadow:0 1px 3px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.2);
+  --shadow-md:0 4px 12px rgba(0,0,0,.3);
+  --shadow-lg:0 8px 30px rgba(0,0,0,.4);
+  --glass:rgba(30,41,59,.7);
+  --mono:'JetBrains Mono',monospace;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;min-height:100vh}
+body::before{content:'';position:fixed;top:0;left:0;right:0;height:400px;background:linear-gradient(180deg,rgba(59,130,246,.08) 0%,transparent 100%);pointer-events:none;z-index:0}
 
 /* Header */
-.hdr{background:linear-gradient(135deg,var(--blue) 0%,var(--blue-dark) 50%,#1e3a8a 100%);color:#fff;padding:1.25rem 1.5rem 1rem;position:sticky;top:0;z-index:100;box-shadow:0 4px 20px rgba(59,130,246,.25)}
-.hdr h1{font-size:1.3rem;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:.4rem}
-.hdr .sub{font-size:.78rem;opacity:.85;margin-top:.2rem;font-family:'JetBrains Mono',monospace;letter-spacing:-.02em}
-.pbar{margin-top:.6rem;background:rgba(255,255,255,.15);border-radius:99px;height:6px;overflow:hidden;max-width:500px;backdrop-filter:blur(4px)}
-.pbar-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#86efac,#fff);transition:width .6s cubic-bezier(.4,0,.2,1)}
-.pbar-label{font-size:.7rem;opacity:.8;margin-top:.2rem;font-family:'JetBrains Mono',monospace}
-.stats{display:flex;gap:.6rem;margin-top:.5rem;font-size:.72rem;flex-wrap:wrap}
-.stat{background:rgba(255,255,255,.12);padding:.25rem .6rem;border-radius:6px;backdrop-filter:blur(4px);display:flex;align-items:center;gap:.25rem}
-.stat b{font-weight:700;font-size:.82rem;font-family:'JetBrains Mono',monospace}
+.hdr{background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06);padding:1.5rem 2rem 1.25rem;position:sticky;top:0;z-index:100}
+.hdr-top{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+.hdr h1{font-size:1.5rem;font-weight:800;letter-spacing:-.02em;display:flex;align-items:center;gap:.5rem;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hdr .status-pill{font-size:.7rem;font-weight:600;padding:.25rem .6rem;border-radius:99px;letter-spacing:.04em;-webkit-text-fill-color:initial}
+.status-testing{background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.3)}
+.status-done{background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)}
+.status-paused{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.3)}
+.hdr .sub{font-size:.75rem;color:var(--text-secondary);margin-top:.35rem;font-family:var(--mono);letter-spacing:-.01em}
+.pbar{margin-top:.75rem;background:rgba(255,255,255,.06);border-radius:99px;height:4px;overflow:hidden;max-width:100%}
+.pbar-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3b82f6,#8b5cf6,#ec4899);background-size:200% 100%;animation:shimmer 3s ease infinite;transition:width .8s cubic-bezier(.4,0,.2,1)}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.pbar-label{font-size:.65rem;color:var(--muted);margin-top:.3rem;font-family:var(--mono)}
+
+/* Stats grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(80px,1fr));gap:.5rem;margin-top:.75rem}
+.stat{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);padding:.5rem .6rem;border-radius:10px;text-align:center}
+.stat b{display:block;font-weight:700;font-size:1.1rem;font-family:var(--mono);background:linear-gradient(135deg,#fff,#94a3b8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stat span{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:500}
+.stat.s-pass b{-webkit-text-fill-color:var(--pass)}
+.stat.s-fail b{-webkit-text-fill-color:var(--fail)}
 
 /* Controls */
-.ctl{display:flex;align-items:center;gap:.5rem;padding:.6rem 1.5rem;background:var(--card);border-bottom:1px solid var(--border);box-shadow:var(--shadow)}
-.ctl button{padding:.4rem .85rem;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:.78rem;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease}
-.ctl button:hover{background:var(--blue-light);border-color:var(--blue);transform:translateY(-1px);box-shadow:var(--shadow)}
+.ctl{display:flex;align-items:center;gap:.5rem;padding:.5rem 2rem;background:var(--glass);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,.04)}
+.ctl button{padding:.4rem .75rem;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text-secondary);font-size:.75rem;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease}
+.ctl button:hover{background:rgba(255,255,255,.1);border-color:var(--border-light);color:#fff;transform:translateY(-1px)}
 .ctl button:active{transform:translateY(0)}
-.ctl .danger{color:var(--fail);border-color:#fecaca}
-.ctl .danger:hover{background:var(--fail-bg);border-color:var(--fail)}
-.ctl-sep{width:1px;height:20px;background:var(--border);margin:0 .2rem}
+.ctl .danger{color:#f87171;border-color:rgba(248,113,113,.3)}
+.ctl .danger:hover{background:rgba(239,68,68,.15);border-color:rgba(248,113,113,.5);color:#fca5a5}
+.ctl-sep{width:1px;height:18px;background:var(--border);margin:0 .15rem}
 
 /* Content */
-.wrap{max-width:920px;margin:0 auto;padding:1.25rem 1rem 3rem}
+.wrap{max-width:860px;margin:0 auto;padding:1.25rem 1.25rem 4rem;position:relative;z-index:1}
 
 /* Checklist items */
-.it{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:.5rem;padding:.75rem 1rem;box-shadow:var(--shadow);transition:all .2s ease;animation:fadeSlideIn .3s ease both}
-.it:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
-.it.running{border-color:var(--blue);border-width:2px;background:var(--blue-50);box-shadow:0 0 0 3px rgba(59,130,246,.1),var(--shadow-md);animation:fadeSlideIn .3s ease both,glowPulse 2s ease-in-out infinite}
-.it.pass{border-left:4px solid var(--pass);background:linear-gradient(90deg,var(--pass-bg) 0%,var(--card) 8%)}
-.it.fail,.it.error{border-left:4px solid var(--fail);background:linear-gradient(90deg,var(--fail-bg) 0%,var(--card) 8%)}
-.it.skip{opacity:.5}
+.it{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;margin-bottom:.5rem;padding:.85rem 1rem;transition:all .25s ease;animation:fadeSlideIn .35s ease both}
+.it:hover{border-color:var(--border-light);transform:translateY(-1px);box-shadow:var(--shadow-md)}
+.it.running{border-color:rgba(59,130,246,.5);background:linear-gradient(135deg,rgba(59,130,246,.08) 0%,var(--bg-card) 100%);box-shadow:0 0 0 1px rgba(59,130,246,.2),0 0 20px rgba(59,130,246,.1);animation:fadeSlideIn .35s ease both,glowPulse 2.5s ease-in-out infinite}
+.it.pass{border-left:3px solid var(--pass)}
+.it.fail,.it.error{border-left:3px solid var(--fail)}
+.it.skip{opacity:.35}
 .it-h{display:flex;align-items:center;gap:.6rem;font-size:.85rem}
-.it-n{width:28px;height:28px;border-radius:8px;background:var(--blue-light);color:var(--blue);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;flex-shrink:0;font-family:'JetBrains Mono',monospace}
-.it.pass .it-n{background:var(--pass-bg);color:var(--pass)}
-.it.fail .it-n,.it.error .it-n{background:var(--fail-bg);color:var(--fail)}
-.it-d{font-weight:600;flex:1;line-height:1.3}
-.badge{padding:.2rem .55rem;border-radius:99px;font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
-.b-pass{background:#dcfce7;color:#16a34a}
-.b-fail{background:#fef2f2;color:#dc2626}
-.b-err{background:#fef3c7;color:#92400e}
-.b-run{background:var(--blue-light);color:var(--blue);animation:pulse 1.5s infinite}
-.b-pend{background:#f1f5f9;color:#cbd5e1;font-size:.55rem}
-.b-skip{background:#f1f5f9;color:var(--muted)}
+.it-n{width:30px;height:30px;border-radius:10px;background:rgba(255,255,255,.05);color:var(--muted);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:.75rem;flex-shrink:0;font-family:var(--mono);border:1px solid rgba(255,255,255,.06)}
+.it.pass .it-n{background:rgba(16,185,129,.12);color:var(--pass);border-color:rgba(16,185,129,.2)}
+.it.fail .it-n,.it.error .it-n{background:rgba(239,68,68,.12);color:var(--fail);border-color:rgba(239,68,68,.2)}
+.it-d{font-weight:600;flex:1;line-height:1.35;font-size:.84rem}
+.badge{padding:.2rem .6rem;border-radius:99px;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.b-pass{background:rgba(16,185,129,.12);color:#6ee7b7;border:1px solid rgba(16,185,129,.2)}
+.b-fail{background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.2)}
+.b-err{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2)}
+.b-run{background:rgba(59,130,246,.12);color:#60a5fa;border:1px solid rgba(59,130,246,.2);animation:pulse 1.5s infinite}
+.b-pend{background:rgba(255,255,255,.03);color:var(--muted);border:1px solid rgba(255,255,255,.06);font-size:.55rem}
+.b-skip{background:rgba(255,255,255,.03);color:var(--muted);border:1px solid rgba(255,255,255,.06)}
+
+/* Item meta row */
+.it-meta{display:flex;gap:.75rem;margin-top:.3rem;font-size:.65rem;color:var(--muted);font-family:var(--mono)}
+.it-meta span{display:flex;align-items:center;gap:.2rem}
 
 /* Animations */
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-@keyframes fadeSlideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes glowPulse{0%,100%{box-shadow:0 0 0 3px rgba(59,130,246,.1),var(--shadow-md)}50%{box-shadow:0 0 0 6px rgba(59,130,246,.15),var(--shadow-md)}}
-@keyframes checkIn{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
-@keyframes confetti{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+@keyframes fadeSlideIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 0 1px rgba(59,130,246,.2),0 0 20px rgba(59,130,246,.1)}50%{box-shadow:0 0 0 2px rgba(59,130,246,.3),0 0 30px rgba(59,130,246,.15)}}
 
 /* Details */
-.detail{font-size:.78rem;color:#475569;margin-top:.3rem;line-height:1.4}
-.detail-how{font-size:.75rem;color:var(--muted);margin-top:.15rem;font-style:italic}
-.thumb{margin-top:.4rem}
-.thumb img{width:120px;height:auto;border-radius:6px;border:1px solid var(--border);cursor:pointer;transition:transform .2s ease,box-shadow .2s ease;box-shadow:var(--shadow)}
-.thumb img:hover{transform:scale(1.05);box-shadow:var(--shadow-md)}
+.detail{font-size:.76rem;color:var(--text-secondary);margin-top:.35rem;line-height:1.45;padding-left:36px}
+.detail-how{font-size:.72rem;color:var(--muted);margin-top:.15rem;font-style:italic;padding-left:36px}
+.thumb{margin-top:.4rem;padding-left:36px}
+.thumb img{width:140px;height:auto;border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:all .2s ease;opacity:.85}
+.thumb img:hover{opacity:1;transform:scale(1.03);box-shadow:var(--shadow-md)}
 
 /* Section headers */
-.sec-h{font-weight:700;font-size:.82rem;margin:1.25rem 0 .5rem;color:var(--blue-dark);padding:.4rem .75rem;background:var(--blue-light);border-radius:8px;display:flex;align-items:center;gap:.4rem;letter-spacing:-.01em}
-.sec-h::before{content:'';width:3px;height:16px;background:var(--blue);border-radius:2px}
+.sec-h{font-weight:700;font-size:.72rem;margin:1.5rem 0 .6rem;color:var(--text-secondary);padding:.5rem .85rem;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;display:flex;align-items:center;gap:.5rem;letter-spacing:.04em;text-transform:uppercase}
+.sec-h::before{content:'';width:3px;height:14px;background:linear-gradient(180deg,var(--blue),#8b5cf6);border-radius:2px}
+.sec-count{font-family:var(--mono);font-weight:400;color:var(--muted);font-size:.65rem;margin-left:auto}
 
 /* Done banner */
-.done{background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);border:2px solid #86efac;border-radius:12px;padding:1.2rem;text-align:center;margin-bottom:1.25rem;font-weight:700;color:#15803d;font-size:1rem;box-shadow:0 4px 12px rgba(34,197,94,.15);animation:fadeSlideIn .5s ease}
-.done .done-stats{display:flex;justify-content:center;gap:1.5rem;margin-top:.5rem;font-size:.85rem;font-weight:500}
+.done{background:linear-gradient(135deg,rgba(16,185,129,.08) 0%,rgba(59,130,246,.06) 100%);border:1px solid rgba(16,185,129,.2);border-radius:14px;padding:1.5rem;text-align:center;margin-bottom:1.5rem;animation:fadeSlideIn .5s ease}
+.done-title{font-size:1.1rem;font-weight:800;background:linear-gradient(135deg,#6ee7b7,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.done-warn .done-title{background:linear-gradient(135deg,#fbbf24,#f87171);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.done .done-stats{display:flex;justify-content:center;gap:2rem;margin-top:.75rem;font-size:.8rem;font-weight:500;color:var(--text-secondary)}
 .done .done-stat{display:flex;align-items:center;gap:.3rem}
-.done .done-stat b{font-family:'JetBrains Mono',monospace;font-size:1.1rem}
+.done .done-stat b{font-family:var(--mono);font-size:1.2rem;color:#fff}
+
+/* Score ring */
+.score-ring{width:72px;height:72px;margin:0 auto .6rem;position:relative}
+.score-ring svg{transform:rotate(-90deg)}
+.score-ring .ring-bg{fill:none;stroke:rgba(255,255,255,.06);stroke-width:5}
+.score-ring .ring-fg{fill:none;stroke-width:5;stroke-linecap:round;transition:stroke-dashoffset .8s ease}
+.score-ring .ring-pass{stroke:var(--pass)}
+.score-ring .ring-fail{stroke:var(--fail)}
+.score-pct{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:1rem;color:#fff}
 
 /* Responsive */
 @media(max-width:640px){
-  .hdr{padding:.8rem 1rem}
-  .hdr h1{font-size:1.1rem}
-  .stats{gap:.4rem}
-  .stat{padding:.2rem .4rem;font-size:.65rem}
-  .ctl{padding:.5rem .75rem;gap:.3rem}
-  .ctl button{padding:.3rem .5rem;font-size:.7rem}
+  .hdr{padding:1rem}
+  .hdr h1{font-size:1.2rem}
+  .stats{grid-template-columns:repeat(4,1fr);gap:.35rem}
+  .stat{padding:.35rem .4rem}
+  .stat b{font-size:.9rem}
+  .ctl{padding:.4rem .75rem;gap:.3rem}
+  .ctl button{padding:.3rem .5rem;font-size:.68rem}
   .wrap{padding:.75rem .5rem}
-  .it{padding:.6rem .75rem;border-radius:8px}
+  .it{padding:.65rem .75rem;border-radius:10px}
   .it-d{font-size:.8rem}
+  .detail,.detail-how,.thumb{padding-left:0}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 """
@@ -1250,16 +1285,28 @@ class DashHandler(BaseHTTPRequestHandler):
 
     def _render(self, s):
         c = s.counts()
-        done_pct = int((c["pass"]+c["fail"]+c["error"]+c["skip"]) / max(c["total"],1) * 100)
+        completed = c["pass"]+c["fail"]+c["error"]+c["skip"]
+        done_pct = int(completed / max(c["total"],1) * 100)
+        pass_pct = int(c["pass"] / max(completed,1) * 100) if completed else 0
         status = "PAUSED" if s.paused else ("DONE" if not s.running else "TESTING")
-        live = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:4px;animation:pulse 1.5s infinite"></span>' if s.running else ""
+        status_css = {"TESTING":"status-testing","DONE":"status-done","PAUSED":"status-paused"}[status]
+
+        # Section counts
+        sec_counts = {}
+        for it in s.checklist:
+            sec_counts.setdefault(it.section, {"total":0,"pass":0,"fail":0})
+            sec_counts[it.section]["total"] += 1
+            if it.status == "pass": sec_counts[it.section]["pass"] += 1
+            elif it.status in ("fail","error"): sec_counts[it.section]["fail"] += 1
 
         items = ""
         sec = ""
         for i, it in enumerate(s.checklist):
             if it.section != sec:
                 sec = it.section
-                items += f'<div class="sec-h">{sec}</div>'
+                sc = sec_counts.get(sec, {})
+                sc_label = f'{sc.get("pass",0)}/{sc.get("total",0)}'
+                items += f'<div class="sec-h">{sec}<span class="sec-count">{sc_label}</span></div>'
             css = f"it {it.status}" if it.status != "pending" else "it"
             if i == s.current_item_idx and s.running:
                 css = "it running"
@@ -1268,47 +1315,71 @@ class DashHandler(BaseHTTPRequestHandler):
             det = f'<div class="detail">{it.result_detail[:150]}</div>' if it.result_detail else ""
             if it.how:
                 det += f'<div class="detail-how">{it.how[:120]}</div>'
+            # Meta row: attempts, model time, URL
+            meta_parts = []
+            if it.attempts:
+                meta_parts.append(f'{it.attempts} attempt{"s" if it.attempts != 1 else ""}')
+            if it.model_time > 0:
+                meta_parts.append(f'{it.model_time:.1f}s model')
+            if it.url:
+                path = it.url.split("//",1)[-1].split("/",1)[-1] if "//" in it.url else it.url
+                meta_parts.append(f'/{path[:40]}')
+            if meta_parts:
+                det += '<div class="it-meta">' + ''.join(f'<span>{p}</span>' for p in meta_parts) + '</div>'
             if it.screenshot:
                 sc_name = os.path.basename(it.screenshot)
-                det += f'<div class="thumb"><a href="/screenshots/{sc_name}" target="_blank"><img src="/screenshots/{sc_name}" alt="screenshot"></a></div>'
-            items += f'<div class="{css}" style="animation-delay:{i*0.03}s"><div class="it-h"><div class="it-n">{it.step_id}</div><div class="it-d">{it.description}</div><span class="badge {bc}">{bt}</span></div>{det}</div>'
+                det += f'<div class="thumb"><a href="/screenshots/{sc_name}" target="_blank"><img src="/screenshots/{sc_name}" alt="screenshot" loading="lazy"></a></div>'
+            items += f'<div class="{css}" style="animation-delay:{i*0.02}s"><div class="it-h"><div class="it-n">{it.step_id}</div><div class="it-d">{it.description}</div><span class="badge {bc}">{bt}</span></div>{det}</div>'
 
-        # Done banner with stats breakdown
+        # Score ring SVG
+        circ = 2 * 3.14159 * 28
+        pass_offset = circ - (pass_pct / 100 * circ)
+        fail_offset = circ - ((100 - pass_pct) / 100 * circ) if completed else circ
+
+        # Done banner
         done_b = ""
         if not s.running:
-            pass_icon = "&#10003;" if c["fail"] == 0 else "&#9888;"
-            done_b = f'''<div class="done">{pass_icon} Testing Complete
+            warn = ' done-warn' if c["fail"] > 0 else ''
+            done_b = f'''<div class="done{warn}">
+<div class="score-ring"><svg viewBox="0 0 64 64" width="72" height="72">
+<circle class="ring-bg" cx="32" cy="32" r="28"/><circle class="ring-fg ring-pass" cx="32" cy="32" r="28"
+style="stroke-dasharray:{circ};stroke-dashoffset:{pass_offset}"/></svg>
+<div class="score-pct">{pass_pct}%</div></div>
+<div class="done-title">{"All Tests Passed" if c["fail"]==0 else f'{c["fail"]} Test{"s" if c["fail"]!=1 else ""} Failed'}</div>
 <div class="done-stats">
 <span class="done-stat"><b>{c["pass"]}</b> passed</span>
 <span class="done-stat"><b>{c["fail"]}</b> failed</span>
 <span class="done-stat"><b>{s.elapsed()}</b></span>
 </div></div>'''
 
-        # Stats with pill styling
-        stat = lambda label, val: f'<span class="stat"><b>{val}</b> {label}</span>'
-        stats_html = (
-            stat("pass", c["pass"]) + stat("fail", c["fail"]) + stat("err", c["error"]) +
-            stat("total", c["total"]) + stat("pages", len(s.pages_visited)) +
-            stat("console", len(s.all_console_errors)) + stat("network", len(s.all_network_errors))
-        )
+        # Stats
+        stats_html = f'''
+<div class="stat s-pass"><b>{c["pass"]}</b><span>Pass</span></div>
+<div class="stat s-fail"><b>{c["fail"]}</b><span>Fail</span></div>
+<div class="stat"><b>{c["error"]}</b><span>Error</span></div>
+<div class="stat"><b>{c["total"]}</b><span>Total</span></div>
+<div class="stat"><b>{len(s.pages_visited)}</b><span>Pages</span></div>
+<div class="stat"><b>{len(s.all_console_errors)}</b><span>Console</span></div>
+<div class="stat"><b>{len(s.all_network_errors)}</b><span>Network</span></div>'''
 
         return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QA Agent — {status}</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>">
 <meta http-equiv="refresh" content="2"><style>{DASH_CSS}</style></head><body>
 <div class="hdr">
-<h1>{live}QA Agent <span style="font-weight:400;opacity:.85">{status}</span></h1>
-<div class="sub">{s.url} &middot; {s.model} ({s.provider}) &middot; {s.elapsed()}</div>
+<div class="hdr-top"><div><h1>QA Agent</h1>
+<div class="sub">{s.url} &middot; {s.model} ({s.provider}) &middot; {s.elapsed()}</div></div>
+<span class="status-pill {status_css}">{status}</span></div>
 <div class="pbar"><div class="pbar-fill" style="width:{done_pct}%"></div></div>
-<div class="pbar-label">{done_pct}% complete</div>
+<div class="pbar-label">{done_pct}% &middot; {completed}/{c["total"]} items</div>
 <div class="stats">{stats_html}</div>
 </div>
 <div class="ctl">
-<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'pause'}})}})">&#9208; Pause</button>
-<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'resume'}})}})">&#9654; Resume</button>
+<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'pause'}})}})">Pause</button>
+<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'resume'}})}})">Resume</button>
 <span class="ctl-sep"></span>
-<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'skip'}})}})">&#9197; Skip</button>
-<button class="danger" onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'stop'}})}})">&#9632; Stop</button>
+<button onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'skip'}})}})">Skip</button>
+<button class="danger" onclick="fetch('/api/command',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{cmd:'stop'}})}})">Stop</button>
 </div>
 <div class="wrap">{done_b}{items}</div>
 <script>window.addEventListener('load',function(){{var e=document.querySelector('.it.running');if(e)e.scrollIntoView({{behavior:'smooth',block:'center'}});}});</script></body></html>"""
