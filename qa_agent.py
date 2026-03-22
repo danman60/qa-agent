@@ -59,6 +59,14 @@ MODEL_MENU = [
     {"label": "Kimi K2.5", "host": "NVIDIA NIM cloud", "desc": "free cloud, 40 req/min", "provider": "nim", "url": None},
 ]
 
+# ═══════════════════════════════════════════════════════════════════
+# Server mode globals
+# ═══════════════════════════════════════════════════════════════════
+_server_mode = False           # True when --server is active
+_current_run_state = None      # AgentState of active run (or None)
+_current_run_thread = None     # Thread running the test
+PROJECTS_FILE = Path(__file__).parent / "projects.json"
+
 
 def load_gotchas():
     """Load learned fail phrases from gotchas.md. These are phrases that slipped through
@@ -1080,13 +1088,22 @@ def _learn_gotchas(state):
 
 def run_agent(url, provider, model, checklist_items, report_dir,
               credentials=None, dashboard_port=9876, no_dashboard=False, ollama_url=None,
-              visual=False):
+              visual=False, _state=None):
     if ollama_url:
         global OLLAMA_URL
         OLLAMA_URL = ollama_url
 
-    state = AgentState(report_dir, url=url, model=model, provider=provider)
-    state.checklist = checklist_items
+    if _state is not None:
+        state = _state
+        state.report_dir = Path(report_dir)
+        state.report_dir.mkdir(parents=True, exist_ok=True)
+        (state.report_dir / "screenshots").mkdir(exist_ok=True)
+        state.log_file = state.report_dir / "agent-log.md"
+        with open(state.log_file, "w") as f:
+            f.write(f"# QA Agent Log\nStarted: {datetime.now():%Y-%m-%d %H:%M:%S}\n\n")
+    else:
+        state = AgentState(report_dir, url=url, model=model, provider=provider)
+        state.checklist = checklist_items
 
     state.log("QA Agent — Checklist-Driven Webapp Tester")
     state.log(f"URL: {url}")
@@ -1297,6 +1314,35 @@ class DashHandler(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
     def do_GET(self):
+        global _current_run_state
+        # Server mode routing
+        if _server_mode:
+            if self.path == "/":
+                if _current_run_state and _current_run_state.running:
+                    self._html(self._render(_current_run_state))
+                else:
+                    self._html(self._render_landing())
+                return
+            elif self.path == "/history":
+                self._html(self._render_history())
+                return
+            elif self.path == "/api/state":
+                if _current_run_state:
+                    self._json(_current_run_state.get_status_dict())
+                else:
+                    self._json({"running": False})
+                return
+            elif self.path.startswith("/screenshots/") and _current_run_state:
+                self._serve_screenshot(_current_run_state, self.path[len("/screenshots/"):])
+                return
+            elif self.path.startswith("/reports/"):
+                self._serve_report_file(self.path[len("/reports/"):])
+                return
+            # Fallback: landing
+            self._html(self._render_landing())
+            return
+
+        # Non-server mode (original behavior)
         s = self.server.state
         if self.path == "/api/state":
             self._json(s.get_status_dict())
@@ -1319,12 +1365,264 @@ class DashHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def _serve_report_file(self, path):
+        """Serve a report.md from tests/reports/<run_name>/report.md"""
+        # Sanitize: only allow alphanum, dash, underscore, dot, slash
+        safe = re.sub(r'[^a-zA-Z0-9\-_./]', '', path)
+        filepath = Path(__file__).parent / "tests" / "reports" / safe
+        if filepath.is_file() and filepath.suffix in ('.md', '.json', '.txt'):
+            self.send_response(200)
+            ct = "text/plain; charset=utf-8" if filepath.suffix != '.json' else "application/json"
+            self.send_header("Content-Type", ct)
+            self.end_headers()
+            self.wfile.write(filepath.read_bytes())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def do_POST(self):
+        if self.path == "/api/run" and _server_mode:
+            self._handle_run()
+            return
         if self.path == "/api/command":
             n = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(n)) if n else {}
-            self.server.state.push_cmd(body)
+            if _server_mode and _current_run_state:
+                _current_run_state.push_cmd(body)
+            elif hasattr(self.server, 'state'):
+                self.server.state.push_cmd(body)
             self._json({"ok": True})
+
+    def _handle_run(self):
+        """POST /api/run — launch a test from the project picker."""
+        global _current_run_state, _current_run_thread
+        if _current_run_state and _current_run_state.running:
+            self._json({"ok": False, "error": "A test is already running"})
+            return
+        n = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(n)) if n else {}
+        project_id = body.get("project_id")
+        provider = body.get("provider", "ollama")
+        model = body.get("model", "qwen3-coder:30b")
+
+        # Load project
+        projects = json.loads(PROJECTS_FILE.read_text()) if PROJECTS_FILE.is_file() else []
+        proj = next((p for p in projects if p["id"] == project_id), None)
+        if not proj:
+            self._json({"ok": False, "error": f"Unknown project: {project_id}"})
+            return
+
+        url = proj.get("url", "")
+        if not url:
+            self._json({"ok": False, "error": f"Project {project_id} has no URL"})
+            return
+
+        # Credentials
+        creds = {}
+        if proj.get("email"):
+            creds = {
+                "email": proj["email"],
+                "password": proj.get("password", ""),
+                "login_url": proj.get("login_url", url.rstrip("/") + "/login"),
+            }
+
+        # Checklist
+        items = []
+        cl_path = proj.get("checklist", "")
+        if cl_path and os.path.isfile(cl_path):
+            with open(cl_path) as f:
+                items = parse_checklist(f.read())
+        if not items:
+            items = generate_auto_checklist(url)
+
+        # Resolve ollama URL
+        ollama_url = OLLAMA_URL
+        for m in MODEL_MENU:
+            if m["label"] == model:
+                if m.get("url"):
+                    ollama_url = m["url"]
+                provider = m["provider"]
+                break
+
+        report_dir = f"tests/reports/qa-{datetime.now():%Y%m%d-%H%M%S}"
+        run_id = f"run-{datetime.now():%Y%m%d-%H%M%S}"
+
+        # Create state early so dashboard can show progress during run
+        _current_run_state = AgentState(report_dir, url=url, model=model, provider=provider)
+        _current_run_state.checklist = items
+        pre_state = _current_run_state
+
+        def _run():
+            global _current_run_state
+            try:
+                run_agent(url, provider, model, items, report_dir,
+                          credentials=creds, no_dashboard=True,
+                          ollama_url=ollama_url, _state=pre_state)
+            except Exception as e:
+                print(f"[SERVER] Run failed: {e}", flush=True)
+            finally:
+                if _current_run_state:
+                    _current_run_state.running = False
+
+        _current_run_thread = threading.Thread(target=_run, daemon=True)
+        _current_run_thread.start()
+
+        self._json({"ok": True, "run_id": run_id, "project": proj["name"]})
+
+    def _render_landing(self):
+        """Render the project picker page."""
+        projects = json.loads(PROJECTS_FILE.read_text()) if PROJECTS_FILE.is_file() else []
+
+        # Model options
+        model_opts = ""
+        for m in MODEL_MENU:
+            model_opts += f'<option value="{m["label"]}" data-provider="{m["provider"]}">{m["label"]} ({m["host"]} — {m["desc"]})</option>'
+
+        # Project cards
+        cards = ""
+        for p in projects:
+            has_url = bool(p.get("url"))
+            has_cl = bool(p.get("checklist"))
+            disabled = "" if has_url else 'disabled title="No URL configured"'
+            cl_badge = f'<span class="badge b-pass">Checklist</span>' if has_cl else '<span class="badge b-pend">Auto-discover</span>'
+            url_display = p.get("url", "No URL")[:50] if has_url else '<em style="color:var(--muted)">No URL configured</em>'
+            cards += f'''<div class="proj-card" data-id="{p["id"]}">
+<div class="proj-name">{p["name"]}</div>
+<div class="proj-url">{url_display}</div>
+<div class="proj-badges">{cl_badge}</div>
+<button class="proj-run" {disabled} onclick="launchRun('{p["id"]}')">Run Test</button>
+</div>'''
+
+        return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QA Agent — Server</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>">
+<meta http-equiv="refresh" content="5">
+<style>{DASH_CSS}
+.landing{{max-width:860px;margin:0 auto;padding:2rem 1.25rem}}
+.landing-title{{font-size:1.8rem;font-weight:800;margin-bottom:.3rem;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}}
+.landing-sub{{color:var(--muted);font-size:.85rem;margin-bottom:1.5rem}}
+.config-row{{display:flex;gap:.75rem;margin-bottom:1.5rem;flex-wrap:wrap}}
+.config-row select{{flex:1;min-width:200px;padding:.55rem .75rem;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:.8rem;font-family:inherit}}
+.config-row select:focus{{outline:none;border-color:var(--blue)}}
+.proj-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.75rem}}
+.proj-card{{background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:1.1rem;transition:all .2s ease}}
+.proj-card:hover{{border-color:var(--border-light);transform:translateY(-2px);box-shadow:var(--shadow-md)}}
+.proj-name{{font-weight:700;font-size:.95rem;margin-bottom:.3rem}}
+.proj-url{{font-size:.72rem;color:var(--muted);font-family:var(--mono);margin-bottom:.6rem;word-break:break-all}}
+.proj-badges{{margin-bottom:.7rem}}
+.proj-run{{width:100%;padding:.55rem;border-radius:10px;border:1px solid rgba(59,130,246,.4);background:rgba(59,130,246,.12);color:#60a5fa;font-size:.8rem;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s ease}}
+.proj-run:hover:not(:disabled){{background:rgba(59,130,246,.25);border-color:rgba(59,130,246,.6);transform:translateY(-1px)}}
+.proj-run:disabled{{opacity:.3;cursor:not-allowed}}
+.nav-bar{{display:flex;gap:1rem;margin-bottom:1.5rem}}
+.nav-bar a{{color:var(--text-secondary);text-decoration:none;font-size:.8rem;font-weight:500;padding:.4rem .8rem;border-radius:8px;border:1px solid var(--border);transition:all .15s ease}}
+.nav-bar a:hover,.nav-bar a.active{{color:#fff;background:rgba(255,255,255,.06);border-color:var(--border-light)}}
+</style></head><body>
+<div class="landing">
+<div class="landing-title">QA Agent</div>
+<div class="landing-sub">Select a project and model, then hit Run Test.</div>
+<div class="nav-bar">
+<a href="/" class="active">Projects</a>
+<a href="/history">History</a>
+</div>
+<div class="config-row">
+<select id="model-select">{model_opts}</select>
+</div>
+<div class="proj-grid">{cards}</div>
+</div>
+<script>
+function launchRun(projectId) {{
+  var sel = document.getElementById('model-select');
+  var opt = sel.options[sel.selectedIndex];
+  var model = sel.value;
+  var provider = opt.getAttribute('data-provider');
+  fetch('/api/run', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{project_id: projectId, model: model, provider: provider}})
+  }}).then(r => r.json()).then(d => {{
+    if (d.ok) {{ window.location.href = '/'; }}
+    else {{ alert('Error: ' + d.error); }}
+  }}).catch(e => alert('Request failed: ' + e));
+}}
+</script></body></html>"""
+
+    def _render_history(self):
+        """Render the past runs history page."""
+        reports_dir = Path(__file__).parent / "tests" / "reports"
+        runs = []
+        if reports_dir.is_dir():
+            for d in sorted(reports_dir.iterdir(), reverse=True):
+                if not d.is_dir():
+                    continue
+                report_json = d / "report.json"
+                report_md = d / "report.md"
+                if report_json.is_file():
+                    try:
+                        data = json.loads(report_json.read_text())
+                        c = data.get("counts", {})
+                        runs.append({
+                            "name": d.name,
+                            "url": data.get("url", ""),
+                            "model": data.get("model", ""),
+                            "provider": data.get("provider", ""),
+                            "pass": c.get("pass", 0),
+                            "fail": c.get("fail", 0),
+                            "error": c.get("error", 0),
+                            "total": c.get("total", 0),
+                            "elapsed": data.get("elapsed", ""),
+                            "has_md": report_md.is_file(),
+                        })
+                    except Exception:
+                        runs.append({"name": d.name, "url": "", "model": "", "provider": "",
+                                     "pass": 0, "fail": 0, "error": 0, "total": 0,
+                                     "elapsed": "", "has_md": report_md.is_file()})
+                elif report_md.is_file():
+                    runs.append({"name": d.name, "url": "", "model": "", "provider": "",
+                                 "pass": 0, "fail": 0, "error": 0, "total": 0,
+                                 "elapsed": "", "has_md": True})
+
+        rows = ""
+        for r in runs[:50]:
+            score = int(r["pass"] / max(r["total"], 1) * 100) if r["total"] else 0
+            score_color = "var(--pass)" if score >= 80 else ("var(--error)" if score >= 50 else "var(--fail)")
+            link = f'<a href="/reports/{r["name"]}/report.md" target="_blank" style="color:var(--blue);text-decoration:none">View</a>' if r["has_md"] else ''
+            rows += f'''<tr>
+<td style="font-family:var(--mono);font-size:.75rem">{r["name"]}</td>
+<td style="font-size:.75rem">{r["url"][:40]}</td>
+<td style="font-size:.75rem">{r["model"][:20]}</td>
+<td style="color:{score_color};font-weight:700;font-family:var(--mono)">{score}%</td>
+<td style="font-family:var(--mono);font-size:.75rem"><span style="color:var(--pass)">{r["pass"]}</span>/<span style="color:var(--fail)">{r["fail"]}</span>/{r["total"]}</td>
+<td style="font-size:.75rem">{r["elapsed"]}</td>
+<td>{link}</td>
+</tr>'''
+
+        return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QA Agent — History</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>">
+<style>{DASH_CSS}
+.landing{{max-width:960px;margin:0 auto;padding:2rem 1.25rem}}
+.landing-title{{font-size:1.8rem;font-weight:800;margin-bottom:.3rem;background:linear-gradient(135deg,#fff 0%,#94a3b8 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}}
+.landing-sub{{color:var(--muted);font-size:.85rem;margin-bottom:1.5rem}}
+.nav-bar{{display:flex;gap:1rem;margin-bottom:1.5rem}}
+.nav-bar a{{color:var(--text-secondary);text-decoration:none;font-size:.8rem;font-weight:500;padding:.4rem .8rem;border-radius:8px;border:1px solid var(--border);transition:all .15s ease}}
+.nav-bar a:hover,.nav-bar a.active{{color:#fff;background:rgba(255,255,255,.06);border-color:var(--border-light)}}
+table{{width:100%;border-collapse:collapse}}
+th{{text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:.6rem .5rem;border-bottom:1px solid var(--border)}}
+td{{padding:.65rem .5rem;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}}
+tr:hover td{{background:rgba(255,255,255,.02)}}
+</style></head><body>
+<div class="landing">
+<div class="landing-title">Test History</div>
+<div class="landing-sub">{len(runs)} past runs found</div>
+<div class="nav-bar">
+<a href="/">Projects</a>
+<a href="/history" class="active">History</a>
+</div>
+<table>
+<thead><tr><th>Run</th><th>URL</th><th>Model</th><th>Score</th><th>P/F/T</th><th>Time</th><th></th></tr></thead>
+<tbody>{rows}</tbody>
+</table>
+</div></body></html>"""
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -1545,6 +1843,8 @@ def interactive_setup():
 def main():
     parser = argparse.ArgumentParser(description="QA Agent — Webapp Tester")
     parser.add_argument("url", nargs="?")
+    parser.add_argument("--server", action="store_true",
+                        help="Persistent dashboard server mode (project picker, run history)")
     parser.add_argument("--model", default="qwen3-coder:30b")
     parser.add_argument("--provider", choices=["ollama", "ollama-local", "nim"], default="ollama")
     parser.add_argument("--ollama-url", default=None)
@@ -1564,6 +1864,31 @@ def main():
     parser.add_argument("--compare", default=None,
                         help="Compare models: 'ollama:qwen3-coder:30b,nim:kimi-k2.5'")
     args = parser.parse_args()
+
+    # ── Server mode ──────────────────────────────────────────────
+    if args.server:
+        global _server_mode
+        _server_mode = True
+        port = args.dashboard_port
+        srv = HTTPServer(("0.0.0.0", port), DashHandler)
+        ip = "0.0.0.0"
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            pass
+        print(f"\n  QA Agent Server")
+        print(f"  http://{ip}:{port}")
+        print(f"  http://100.122.177.91:{port} (Tailscale)")
+        print(f"  Ctrl+C to stop\n", flush=True)
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            print("\n  Server stopped.")
+            srv.shutdown()
+        return
 
     if not args.url:
         url, provider, model, ollama_url, creds, items = interactive_setup()
