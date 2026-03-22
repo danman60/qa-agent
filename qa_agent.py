@@ -43,6 +43,8 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 # Config
 # ═══════════════════════════════════════════════════════════════════
 
+GOTCHAS_FILE = Path(__file__).parent / "gotchas.md"
+
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://100.75.112.14:11434")
 OLLAMA_LOCAL_URL = os.environ.get("OLLAMA_LOCAL_URL", "http://127.0.0.1:11434")
 NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
@@ -56,6 +58,48 @@ MODEL_MENU = [
     {"label": "gemma3:12b", "host": "SPYBALLOON 3060", "desc": "lightweight, 39.5 tok/s", "provider": "ollama-local", "url": OLLAMA_LOCAL_URL},
     {"label": "Kimi K2.5", "host": "NVIDIA NIM cloud", "desc": "free cloud, 40 req/min", "provider": "nim", "url": None},
 ]
+
+
+def load_gotchas():
+    """Load learned fail phrases from gotchas.md. These are phrases that slipped through
+    verdict checks in previous runs and were caught post-hoc."""
+    phrases = []
+    if GOTCHAS_FILE.is_file():
+        for line in GOTCHAS_FILE.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("- ") and "|" in line:
+                # Format: - phrase | reason | date
+                phrase = line[2:].split("|")[0].strip().lower()
+                if phrase:
+                    phrases.append(phrase)
+    return phrases
+
+
+def save_gotcha(phrase, reason):
+    """Append a new gotcha phrase learned from this run."""
+    date = datetime.now().strftime("%Y-%m-%d")
+    entry = f"- {phrase} | {reason} | {date}\n"
+    if not GOTCHAS_FILE.is_file():
+        GOTCHAS_FILE.write_text("# QA Agent Gotchas — Learned Fail Phrases\n"
+                                "# Format: - phrase | why it's a false pass | date learned\n"
+                                "# These get loaded into FAIL_PHRASES on every run.\n\n")
+    # Don't add duplicates
+    existing = GOTCHAS_FILE.read_text()
+    if phrase.lower() not in existing.lower():
+        with open(GOTCHAS_FILE, "a") as f:
+            f.write(entry)
+
+
+# Base fail phrases + learned gotchas
+BASE_FAIL_PHRASES = ["not visible", "not found", "no data", "not present",
+                     "may still", "couldn't", "can't find", "cannot find",
+                     "cannot ", "empty", "missing", "error", "failed", "unable",
+                     "not loaded", "not showing", "no table", "no content",
+                     "doesn't show", "does not show", "not displayed",
+                     "still shows login", "has not loaded", "not logged in",
+                     "login screen", "login page"]
+LEARNED_GOTCHAS = load_gotchas()
+FAIL_PHRASES = BASE_FAIL_PHRASES + LEARNED_GOTCHAS
 
 SYSTEM_PROMPT = """You are a browser testing agent. You receive a page snapshot (accessibility tree) and a task.
 
@@ -898,13 +942,7 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
         if action["action"] == "NONE":
             reasoning = action.get("reasoning", "").lower()
             # Tight verdict: fail words checked FIRST, then require positive evidence
-            FAIL_PHRASES = ["not visible", "not found", "no data", "not present",
-                            "may still", "couldn't", "can't find", "cannot find",
-                            "cannot ", "empty", "missing", "error", "failed", "unable",
-                            "not loaded", "not showing", "no table", "no content",
-                            "doesn't show", "does not show", "not displayed",
-                            "still shows login", "has not loaded", "not logged in",
-                            "login screen", "login page"]
+            # Uses module-level FAIL_PHRASES (base + learned gotchas)
             PASS_PHRASES = ["shows", "displays", "contains", "loaded with",
                             "visible with", "confirmed", "verified", "present",
                             "working correctly", "page shows", "table shows",
@@ -933,12 +971,7 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
             # VERIFY action = task confirmed, apply tight verdict
             if action["action"] == "VERIFY":
                 reasoning = action.get("reasoning", "").lower()
-                FAIL_PHRASES = ["not visible", "not found", "no data", "not present",
-                                "may still", "couldn't", "can't find", "cannot find",
-                                "cannot ", "empty", "missing", "error", "failed", "unable",
-                                "not loaded", "not showing", "no table", "no content",
-                                "still shows login", "has not loaded", "not logged in",
-                                "login screen", "login page"]
+                # Uses module-level FAIL_PHRASES (base + learned gotchas)
                 if any(p in reasoning for p in FAIL_PHRASES):
                     last_result = f"VERIFY negative: {detail[:150]}"
                     continue
@@ -1021,6 +1054,30 @@ def run_harness_checks(browser, state):
 # Main Entry
 # ═══════════════════════════════════════════════════════════════════
 
+def _learn_gotchas(state):
+    """Post-run: detect suspicious PASS verdicts and save new gotcha phrases."""
+    learned = 0
+    for item in state.checklist:
+        if item.status != "pass" or not item.result_detail:
+            continue
+        detail = item.result_detail.lower()
+        # Suspicious: passed but reasoning contains negative language
+        suspicious_words = ["but", "however", "although", "not able", "couldn't",
+                            "still on", "unable", "no ", "didn't", "wasn't"]
+        if any(w in detail for w in suspicious_words):
+            # Extract the suspicious phrase (first 4 words after the negative word)
+            for w in suspicious_words:
+                idx = detail.find(w)
+                if idx >= 0:
+                    snippet = detail[idx:idx+40].split(".")[0].strip()
+                    if len(snippet) > 5:
+                        save_gotcha(snippet, f"false pass on: {item.description[:50]}")
+                        learned += 1
+                        break
+    if learned:
+        state.log(f"Learned {learned} new gotcha(s) → {GOTCHAS_FILE.name}", "info")
+
+
 def run_agent(url, provider, model, checklist_items, report_dir,
               credentials=None, dashboard_port=9876, no_dashboard=False, ollama_url=None,
               visual=False):
@@ -1035,6 +1092,8 @@ def run_agent(url, provider, model, checklist_items, report_dir,
     state.log(f"URL: {url}")
     state.log(f"Model: {model or NIM_MODEL} ({provider})")
     state.log(f"Checklist: {len(checklist_items)} items")
+    if LEARNED_GOTCHAS:
+        state.log(f"Loaded {len(LEARNED_GOTCHAS)} learned gotchas from {GOTCHAS_FILE.name}", "info")
 
     # Dashboard
     dashboard = None
@@ -1082,6 +1141,9 @@ def run_agent(url, provider, model, checklist_items, report_dir,
     state.write_reports()
     c = state.counts()
     state.log(f"\nDONE: {c['pass']} PASS, {c['fail']} FAIL, {c['error']} ERROR, {c['skip']} SKIP / {c['total']} total", "success")
+
+    # Learn gotchas: scan passed items for suspicious verdicts
+    _learn_gotchas(state)
 
     browser.close()
 
