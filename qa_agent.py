@@ -1426,11 +1426,14 @@ class DashHandler(BaseHTTPRequestHandler):
                 "login_url": proj.get("login_url", url.rstrip("/") + "/login"),
             }
 
-        # Checklist
+        # Checklist — prefer request override, then project default
         items = []
-        cl_path = proj.get("checklist", "")
+        cl_path = body.get("checklist", "") or proj.get("checklist", "")
         if cl_path and os.path.isfile(cl_path):
             with open(cl_path) as f:
+                items = parse_checklist(f.read())
+        elif cl_path and os.path.isfile(Path(__file__).parent / cl_path):
+            with open(Path(__file__).parent / cl_path) as f:
                 items = parse_checklist(f.read())
         if not items:
             items = generate_auto_checklist(url)
@@ -1478,18 +1481,59 @@ class DashHandler(BaseHTTPRequestHandler):
         for m in MODEL_MENU:
             model_opts += f'<option value="{m["label"]}" data-provider="{m["provider"]}">{m["label"]} ({m["host"]} — {m["desc"]})</option>'
 
-        # Project cards
+        # Project cards with test discovery
         cards = ""
         for p in projects:
             has_url = bool(p.get("url"))
-            has_cl = bool(p.get("checklist"))
             disabled = "" if has_url else 'disabled title="No URL configured"'
-            cl_badge = f'<span class="badge b-pass">Checklist</span>' if has_cl else '<span class="badge b-pend">Auto-discover</span>'
             url_display = p.get("url", "No URL")[:50] if has_url else '<em style="color:var(--muted)">No URL configured</em>'
+
+            # Discover test files
+            test_files = []
+            # Explicit checklist
+            cl = p.get("checklist", "")
+            if cl and os.path.isfile(cl):
+                test_files.append(("checklist", cl, os.path.basename(cl)))
+            elif cl and os.path.isfile(Path(__file__).parent / cl):
+                test_files.append(("checklist", str(Path(__file__).parent / cl), os.path.basename(cl)))
+            # Scan test_dir for flow files
+            test_dir = p.get("test_dir", "")
+            if test_dir and os.path.isdir(test_dir):
+                for f in sorted(Path(test_dir).glob("flow-*.md")):
+                    test_files.append(("flow", str(f), f.name))
+                for f in sorted(Path(test_dir).glob("*.spec.ts")):
+                    test_files.append(("spec", str(f), f.name))
+                # Check for TEST_PLAN.md
+                tp = Path(test_dir) / "TEST_PLAN.md"
+                if tp.is_file():
+                    test_files.append(("plan", str(tp), "TEST_PLAN.md"))
+            # Scan repo tests/ dir as fallback
+            repo = p.get("repo", "")
+            if repo and not test_files:
+                for pattern in ["tests/**/*.md", "scripts/test-*.md"]:
+                    for f in sorted(Path(repo).glob(pattern)):
+                        if "node_modules" not in str(f) and ".next" not in str(f):
+                            test_files.append(("md", str(f), f.name))
+                            if len(test_files) >= 10:
+                                break
+
+            # Build test selector dropdown
+            if test_files:
+                opts = '<option value="">Auto-discover</option>'
+                for ttype, tpath, tname in test_files:
+                    label = {"flow": "Flow", "spec": "Spec", "checklist": "Checklist", "plan": "Plan", "md": "Test"}.get(ttype, "")
+                    opts += f'<option value="{tpath}">[{label}] {tname}</option>'
+                test_select = f'<select class="test-select" id="tests-{p["id"]}" style="width:100%;margin-bottom:.5rem;padding:.4rem .6rem;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:.72rem;font-family:var(--mono)">{opts}</select>'
+                test_badge = f'<span class="badge b-pass">{len(test_files)} test{"s" if len(test_files)!=1 else ""}</span>'
+            else:
+                test_select = ''
+                test_badge = '<span class="badge b-pend">Auto-discover</span>'
+
             cards += f'''<div class="proj-card" data-id="{p["id"]}">
 <div class="proj-name">{p["name"]}</div>
 <div class="proj-url">{url_display}</div>
-<div class="proj-badges">{cl_badge}</div>
+<div class="proj-badges">{test_badge}</div>
+{test_select}
 <button class="proj-run" {disabled} onclick="launchRun('{p["id"]}')">Run Test</button>
 </div>'''
 
@@ -1535,10 +1579,12 @@ function launchRun(projectId) {{
   var opt = sel.options[sel.selectedIndex];
   var model = sel.value;
   var provider = opt.getAttribute('data-provider');
+  var testSel = document.getElementById('tests-' + projectId);
+  var checklist = testSel ? testSel.value : '';
   fetch('/api/run', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{project_id: projectId, model: model, provider: provider}})
+    body: JSON.stringify({{project_id: projectId, model: model, provider: provider, checklist: checklist}})
   }}).then(r => r.json()).then(d => {{
     if (d.ok) {{ window.location.href = '/'; }}
     else {{ alert('Error: ' + d.error); }}

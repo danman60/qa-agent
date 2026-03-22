@@ -1,0 +1,79 @@
+[
+  {
+    "id": "compportal-cd",
+    "name": "CompPortal (CD)",
+    "url": "https://tester.compsync.net",
+    "repo": "/home/danman60/projects/CompPortal",
+    "checklist": "checklists/compportal-cd.md",
+    "test_dir": "/home/danman60/projects/CompPortal/tests/agent",
+    "email": "testcd@compsync.net",
+    "password": "1CompSyncLogin!",
+    "login_url": "https://tester.compsync.net/login"
+  },
+  {
+    "id": "compportal-sd",
+    "name": "CompPortal (SD)",
+    "url": "https://tester.compsync.net",
+    "repo": "/home/danman60/projects/CompPortal",
+    "checklist": "",
+    "test_dir": "/home/danman60/projects/CompPortal/tests/agent",
+    "email": "testsd@compsync.net",
+    "password": "1CompSyncLogin!",
+    "login_url": "https://tester.compsync.net/login"
+  },
+  {
+    "id": "compportal-prod",
+    "name": "CompPortal (Prod)",
+    "url": "https://www.compsync.net",
+    "repo": "/home/danman60/projects/CompPortal",
+    "checklist": "/home/danman60/projects/CompPortal/scripts/test-business-workflows.md",
+    "test_dir": "/home/danman60/projects/CompPortal/tests/agent",
+    "email": "",
+    "password": "",
+    "login_url": ""
+  },
+  {
+    "id": "amplify",
+    "name": "Amplify",
+    "url": "https://amplify-brown.vercel.app",
+    "repo": "/home/danman60/projects/amplify",
+    "checklist": "",
+    "test_dir": "/home/danman60/projects/amplify/tests/agent",
+    "email": "test-amplify@test.local",
+    "password": "TestAmplify2026!",
+    "login_url": ""
+  },
+  {
+    "id": "foundervision",
+    "name": "Founder Vision",
+    "url": "",
+    "repo": "/home/danman60/projects/foundervision",
+    "checklist": "",
+    "test_dir": "/home/danman60/projects/foundervision/tests/agent",
+    "email": "",
+    "password": "",
+    "login_url": ""
+  },
+  {
+    "id": "ddd",
+    "name": "DDD Dashboard",
+    "url": "https://ddd-one-tawny.vercel.app",
+    "repo": "/home/danman60/projects/ddd",
+    "checklist": "",
+    "test_dir": "",
+    "email": "",
+    "password": "",
+    "login_url": ""
+  },
+  {
+    "id": "studiosage",
+    "name": "StudioSage",
+    "url": "",
+    "repo": "/home/danman60/projects/StudioSage",
+    "checklist": "",
+    "test_dir": "/home/danman60/projects/StudioSage/tests/e2e",
+    "email": "",
+    "password": "",
+    "login_url": ""
+  }
+]
