@@ -16,6 +16,7 @@ import sys
 import os
 import re
 import time
+import hashlib
 import subprocess
 import argparse
 import urllib.request
@@ -28,7 +29,7 @@ DEFAULT_HOST = "http://100.75.112.14:11434"  # FIRMAMENT
 NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NIM_KEY = os.environ.get("NIM_API_KEY", "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")
 NIM_MODEL = "moonshotai/kimi-k2.5"
-MAX_TURNS = 50
+MAX_TURNS = 150
 MAX_TOOL_ERRORS = 5
 
 # ═══════════════════════════════════════════════════════════════════
@@ -399,7 +400,47 @@ class StatusWriter:
         self.files_changed = []
         self.state = "running"
         self.start_time = time.time()
+        self.session_id = hashlib.md5(task_file.encode()).hexdigest()[:12]
         self.log_file.write_text(f"# Local Runner Log\nStarted: {datetime.now():%H:%M:%S}\n\n")
+
+        # Write JSONL transcript for CCBot Telegram forwarding
+        # CCBot reads ~/.claude/projects/<project-path>/<session-id>.jsonl
+        self._init_transcript()
+
+    def _init_transcript(self):
+        """Create a JSONL transcript file that CCBot can discover and forward to Telegram."""
+        # Determine project path from CWD
+        cwd = os.getcwd()
+        # CCBot project dirs use dashes for path separators
+        project_key = cwd.replace("/", "-").lstrip("-")
+        transcript_dir = Path.home() / ".claude" / "projects" / project_key
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        self.transcript_file = transcript_dir / f"{self.session_id}.jsonl"
+        # Write initial session start entry
+        self._write_transcript({
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": f"Local LLM runner started (session {self.session_id})"}]},
+            "sessionId": self.session_id,
+            "cwd": cwd,
+        })
+
+    def _write_transcript(self, entry):
+        """Append a JSONL line that CCBot's session monitor can parse."""
+        entry["timestamp"] = datetime.now().isoformat()
+        try:
+            with open(self.transcript_file, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception:
+            pass
+
+    def transcript_message(self, role, text):
+        """Write a message to the transcript for CCBot to forward to Telegram."""
+        self._write_transcript({
+            "type": role,
+            "message": {"role": role, "content": [{"type": "text", "text": text}]},
+            "sessionId": self.session_id,
+            "cwd": os.getcwd(),
+        })
 
     def log(self, msg):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -407,6 +448,10 @@ class StatusWriter:
         print(line, flush=True)
         with open(self.log_file, "a") as f:
             f.write(line + "\n")
+        # Forward key messages to CCBot transcript for Telegram topics
+        if any(msg.startswith(p) for p in ["LLM:", "TOOL:", "DONE:", "BLOCKED:", "INJECTED",
+                                            "OLLAMA ERROR", "Circuit breaker", "Provider:", "Model:", "Task:"]):
+            self.transcript_message("assistant", msg)
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
