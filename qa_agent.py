@@ -185,6 +185,12 @@ class ChecklistItem:
 
 
 def parse_checklist(text):
+    # Check if this is a flow file format
+    if "**Action:**" in text or "**Actions:**" in text:
+        # Delegate to flow file parser
+        steps = parse_flow_file(text)
+        return flow_to_checklist(steps)
+
     items = []
     section = "General"
     n = 0
@@ -207,6 +213,132 @@ def parse_checklist(text):
                     desc, how = content.split(sep, 1)
                     break
             items.append(ChecklistItem(section, str(n), desc.strip(), how.strip()))
+    return items
+
+
+def parse_flow_file(text):
+    """Parse flow format test files into structured steps.
+
+    Extracts steps with: step_number, title, action, expected, verify.
+    Handles variations like Action/Actions, Expected/Expect, Verify/Check/Assert.
+    """
+    steps = []
+    # Split by step headers
+    step_pattern = r'^##\s*Step\s+(\d+)\s*:\s*(.+)$'
+    lines = text.split('\n')
+
+    current_step = None
+    current_field = None
+    field_content = []
+
+    # Field patterns to detect (normalized to standard names)
+    field_patterns = {
+        'action': r'^\*\*(?:Action|Actions):\*\*\s*(.*)$',
+        'expected': r'^\*\*(?:Expected|Expect):\*\*\s*(.*)$',
+        'verify': r'^\*\*(?:Verify|Check|Assert):\*\*\s*(.*)$',
+        'console': r'^\*\*Console:\*\*\s*(.*)$',
+        'screenshot': r'^\*\*Screenshot:\*\*\s*(.*)$',
+        'depends_on': r'^\*\*DEPENDS_ON:\*\*\s*(.*)$',
+    }
+
+    def finalize_field():
+        nonlocal current_step, current_field, field_content
+        if current_step and current_field and field_content:
+            content = '\n'.join(field_content).strip()
+            current_step[current_field] = content
+            current_field = None
+            field_content = []
+
+    def finalize_step():
+        finalize_field()
+        nonlocal current_step
+        if current_step and 'step_number' in current_step:
+            steps.append(current_step)
+        current_step = None
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Check for step header
+        step_match = re.match(step_pattern, line, re.IGNORECASE)
+        if step_match:
+            finalize_step()
+            step_num = int(step_match.group(1))
+            title = step_match.group(2).strip()
+            current_step = {
+                'step_number': step_num,
+                'title': title,
+                'action': '',
+                'expected': '',
+                'verify': '',
+            }
+            current_field = None
+            field_content = []
+            continue
+
+        if not current_step:
+            continue
+
+        # Check for field headers
+        field_matched = False
+        for field_name, pattern in field_patterns.items():
+            match = re.match(pattern, stripped, re.IGNORECASE)
+            if match:
+                finalize_field()
+                current_field = field_name
+                content = match.group(1) if match.groups() else ''
+                if content:
+                    field_content.append(content)
+                field_matched = True
+                break
+
+        if field_matched:
+            continue
+
+        # Check for continuation lines (indented or part of multi-line content)
+        if current_field and stripped:
+            # Skip lines that are just separators (---)
+            if stripped == '---':
+                continue
+            # Skip empty field indicators from other patterns
+            if stripped.startswith('- ') or re.match(r'^\d+[.)]', stripped):
+                # This might be a numbered list item, include it
+                field_content.append(stripped)
+            else:
+                field_content.append(stripped)
+
+    finalize_step()
+
+    # Sort by step number
+    steps.sort(key=lambda s: s.get('step_number', 0))
+    return steps
+
+
+def flow_to_checklist(steps):
+    """Convert parsed flow steps to ChecklistItem objects."""
+    items = []
+    for step in steps:
+        step_num = step.get('step_number', 0)
+        title = step.get('title', '')
+        action = step.get('action', '')
+        expected = step.get('expected', '')
+        verify = step.get('verify', '')
+
+        # Build description: title + action (truncated to 100 chars)
+        action_preview = action.split('\n')[0] if action else ''
+        desc = f"{title}: {action_preview}" if action_preview else title
+        if len(desc) > 100:
+            desc = desc[:97] + '...'
+
+        # Build how: Expected + Verify criteria
+        how_parts = []
+        if expected:
+            how_parts.append(f"Expected: {expected}")
+        if verify:
+            how_parts.append(f"Verify: {verify}")
+        how = " | ".join(how_parts)
+
+        items.append(ChecklistItem("General", str(step_num), desc, how))
     return items
 
 
@@ -1435,6 +1567,18 @@ class DashHandler(BaseHTTPRequestHandler):
         elif cl_path and os.path.isfile(Path(__file__).parent / cl_path):
             with open(Path(__file__).parent / cl_path) as f:
                 items = parse_checklist(f.read())
+        if not items and cl_path and cl_path.endswith('.md'):
+            # Try flow file format as fallback
+            if os.path.isfile(cl_path):
+                with open(cl_path) as f:
+                    steps = parse_flow_file(f.read())
+                    if steps:
+                        items = flow_to_checklist(steps)
+            elif os.path.isfile(Path(__file__).parent / cl_path):
+                with open(Path(__file__).parent / cl_path) as f:
+                    steps = parse_flow_file(f.read())
+                    if steps:
+                        items = flow_to_checklist(steps)
         if not items:
             items = generate_auto_checklist(url)
 
@@ -1962,6 +2106,12 @@ def main():
         if args.checklist and os.path.isfile(args.checklist):
             with open(args.checklist) as f:
                 items = parse_checklist(f.read())
+        elif args.checklist and args.checklist.endswith('.md'):
+            # Try flow file format as fallback
+            with open(args.checklist) as f:
+                steps = parse_flow_file(f.read())
+                if steps:
+                    items = flow_to_checklist(steps)
         if not items:
             items = generate_auto_checklist(url)
 
@@ -2003,6 +2153,12 @@ def _run_comparison(args, url, creds, items, ollama_url):
         if args.checklist and os.path.isfile(args.checklist):
             with open(args.checklist) as f:
                 fresh_items = parse_checklist(f.read())
+        elif args.checklist and args.checklist.endswith('.md'):
+            # Try flow file format as fallback
+            with open(args.checklist) as f:
+                steps = parse_flow_file(f.read())
+                if steps:
+                    fresh_items = flow_to_checklist(steps)
         if not fresh_items:
             fresh_items = generate_auto_checklist(url)
 

@@ -1,0 +1,26 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - link "archive.today webpage capture" [ref=e5] [cursor=pointer]:
+      - /url: https://archive.today/
+      - generic [ref=e6]: archive.today
+      - generic [ref=e7]: webpage capture
+    - generic [ref=e9]:
+      - textbox "search term" [ref=e11]: https://www.sitepoint.com/benchmarking-local-models-minimax25-vs-llama-3-vs-mistral/
+      - button "search" [ref=e13]
+  - generic [ref=e16]:
+    - text: No results
+    - generic [ref=e18]:
+      - generic [ref=e19]: You may want to
+      - list [ref=e20]:
+        - listitem [ref=e21]:
+          - link "archive this url" [ref=e22] [cursor=pointer]:
+            - /url: /?url=https://www.sitepoint.com/benchmarking-local-models-minimax25-vs-llama-3-vs-mistral/
+        - listitem [ref=e23]:
+          - link "search this url in Archive.Org" [ref=e24] [cursor=pointer]:
+            - /url: http://web.archive.org/web/*/https://www.sitepoint.com/benchmarking-local-models-minimax25-vs-llama-3-vs-mistral/
+        - listitem [ref=e25]:
+          - link "search this url in WebCite" [ref=e26] [cursor=pointer]:
+            - /url: http://www.webcitation.org/query?url=https://www.sitepoint.com/benchmarking-local-models-minimax25-vs-llama-3-vs-mistral/
+        - listitem [ref=e27]:
+          - link "search this url in Megalodon" [ref=e28] [cursor=pointer]:
+            - /url: http://megalodon.jp/?url=https://www.sitepoint.com/benchmarking-local-models-minimax25-vs-llama-3-vs-mistral/

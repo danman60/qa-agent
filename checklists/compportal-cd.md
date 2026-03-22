@@ -1,7 +1,7 @@
 # CompPortal — Competition Director Testing
 
 ## Login & Dashboard
-- Login page loads with email and password fields
+- Verify you are logged in and on the dashboard (do NOT sign out or navigate to login page — confirm authentication succeeded by checking current page content)
 - Dashboard shows after login — verify widgets, stats, or welcome message
 - Dashboard sidebar has navigation links for all major sections
 
