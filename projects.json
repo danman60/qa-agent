@@ -2,6 +2,7 @@
   {
     "id": "compportal-cd",
     "name": "CompPortal (CD)",
+    "platform": "web",
     "url": "https://tester.compsync.net",
     "repo": "/home/danman60/projects/CompPortal",
     "checklist": "checklists/compportal-cd.md",
@@ -13,6 +14,7 @@
   {
     "id": "compportal-sd",
     "name": "CompPortal (SD)",
+    "platform": "web",
     "url": "https://tester.compsync.net",
     "repo": "/home/danman60/projects/CompPortal",
     "checklist": "",
@@ -24,6 +26,7 @@
   {
     "id": "compportal-prod",
     "name": "CompPortal (Prod)",
+    "platform": "web",
     "url": "https://www.compsync.net",
     "repo": "/home/danman60/projects/CompPortal",
     "checklist": "/home/danman60/projects/CompPortal/scripts/test-business-workflows.md",
@@ -35,6 +38,7 @@
   {
     "id": "amplify",
     "name": "Amplify",
+    "platform": "web",
     "url": "https://amplify-brown.vercel.app",
     "repo": "/home/danman60/projects/amplify",
     "checklist": "",
@@ -46,6 +50,7 @@
   {
     "id": "foundervision",
     "name": "Founder Vision",
+    "platform": "web",
     "url": "",
     "repo": "/home/danman60/projects/foundervision",
     "checklist": "",
@@ -57,6 +62,7 @@
   {
     "id": "ddd",
     "name": "DDD Dashboard",
+    "platform": "web",
     "url": "https://ddd-one-tawny.vercel.app",
     "repo": "/home/danman60/projects/ddd",
     "checklist": "",
@@ -68,6 +74,7 @@
   {
     "id": "studiosage",
     "name": "StudioSage",
+    "platform": "web",
     "url": "",
     "repo": "/home/danman60/projects/StudioSage",
     "checklist": "",
@@ -75,5 +82,18 @@
     "email": "",
     "password": "",
     "login_url": ""
+  },
+  {
+    "id": "lillearner",
+    "name": "LilLearner",
+    "platform": "android",
+    "package": "com.lillearner.app",
+    "apk_path": "/mnt/firmament/LilLearner-mega-build-2026-03-25.apk",
+    "repo": "/home/danman60/projects/LilLearner",
+    "checklist": "",
+    "test_dir": "",
+    "email": "",
+    "password": "",
+    "url": ""
   }
 ]

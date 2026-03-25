@@ -1550,10 +1550,13 @@ class DashHandler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": f"Unknown project: {project_id}"})
             return
 
+        platform = proj.get("platform", "web")
         url = proj.get("url", "")
-        if not url:
+        if not url and platform == "web":
             self._json({"ok": False, "error": f"Project {project_id} has no URL"})
             return
+        if not url and platform == "android":
+            url = f"android://{proj.get('package', project_id)}"
 
         # Credentials
         creds = {}
@@ -1605,12 +1608,22 @@ class DashHandler(BaseHTTPRequestHandler):
         _current_run_state.checklist = items
         pre_state = _current_run_state
 
+        # Create executor based on platform
+        exec_instance = None
+        if platform == "android":
+            from executors.avd import AVDExecutor
+            exec_instance = AVDExecutor(
+                apk_path=proj.get("apk_path", ""),
+                package=proj.get("package", ""),
+            )
+
         def _run():
             global _current_run_state
             try:
                 run_agent(url, provider, model, items, report_dir,
                           credentials=creds, no_dashboard=True,
-                          ollama_url=ollama_url, _state=pre_state)
+                          ollama_url=ollama_url, _state=pre_state,
+                          executor=exec_instance)
             except Exception as e:
                 print(f"[SERVER] Run failed: {e}", flush=True)
             finally:
