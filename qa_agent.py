@@ -39,6 +39,7 @@ os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", os.path.expanduser("~/.cache/m
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from executors.web import WebExecutor
+from executors.base import BaseExecutor
 
 # ═══════════════════════════════════════════════════════════════════
 # Config
@@ -1176,18 +1177,19 @@ def run_harness_checks(executor, state):
         for ne in state.all_network_errors[:5]:
             state.log(f"  [{ne['status']}] {ne['url'][:100]}", "error")
 
-    # Mobile viewport check
-    try:
-        state.log("Testing mobile viewport (375x812)...", "action")
-        executor.set_viewport(375, 812)
-        time.sleep(1)
-        snap = executor.snapshot()
-        sc_path = str(state.report_dir / "screenshots" / "mobile-viewport.png")
-        executor.screenshot(sc_path)
-        state.log(f"  Mobile screenshot saved: {sc_path}", "success")
-        executor.set_viewport(1280, 720)  # Reset
-    except Exception as e:
-        state.log(f"  Mobile viewport check failed: {e}", "error")
+    # Mobile viewport check (web only)
+    if isinstance(executor, WebExecutor):
+        try:
+            state.log("Testing mobile viewport (375x812)...", "action")
+            executor.set_viewport(375, 812)
+            time.sleep(1)
+            snap = executor.snapshot()
+            sc_path = str(state.report_dir / "screenshots" / "mobile-viewport.png")
+            executor.screenshot(sc_path)
+            state.log(f"  Mobile screenshot saved: {sc_path}", "success")
+            executor.set_viewport(1280, 720)  # Reset
+        except Exception as e:
+            state.log(f"  Mobile viewport check failed: {e}", "error")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1220,7 +1222,7 @@ def _learn_gotchas(state):
 
 def run_agent(url, provider, model, checklist_items, report_dir,
               credentials=None, dashboard_port=9876, no_dashboard=False, ollama_url=None,
-              visual=False, _state=None):
+              visual=False, _state=None, executor=None):
     if ollama_url:
         global OLLAMA_URL
         OLLAMA_URL = ollama_url
@@ -1253,19 +1255,23 @@ def run_agent(url, provider, model, checklist_items, report_dir,
             state.log(f"Dashboard failed: {e}", "warn")
 
     # Launch executor
-    executor = WebExecutor(visual=visual)
-    executor.setup()
-    state.log("Browser launched", "success")
+    if executor is None:
+        executor = WebExecutor(visual=visual)
+    if not executor.setup():
+        state.log("Executor setup failed", "error")
+        return state
+    state.log(f"Executor launched ({executor.__class__.__name__})", "success")
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    # Login
+    # Login (web-specific — Android apps handle auth via checklist steps)
     login_ok = True
-    if credentials and credentials.get("email"):
+    is_web = isinstance(executor, WebExecutor)
+    if is_web and credentials and credentials.get("email"):
         if not do_login(executor, state, credentials):
             state.log("Login FAILED — skipping all items that require auth", "error")
             login_ok = False
-    else:
+    elif is_web:
         executor.navigate(url)
         state.pages_visited.add(url)
 
@@ -2051,6 +2057,14 @@ def main():
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument("--visual", action="store_true",
                         help="Headed browser with element highlights and slow_mo (watch it work)")
+    parser.add_argument("--executor", choices=["web", "avd", "device"], default="web",
+                        help="Executor type: web (Playwright), avd (Android emulator), device (real phone)")
+    parser.add_argument("--apk", default=None,
+                        help="Path to APK file (for avd/device executors)")
+    parser.add_argument("--package", default=None,
+                        help="Android package name (auto-detected from APK if omitted)")
+    parser.add_argument("--device", default=None,
+                        help="Device ID from PhoneFarm registry (for device executor)")
     parser.add_argument("--compare", default=None,
                         help="Compare models: 'ollama:qwen3-coder:30b,nim:kimi-k2.5'")
     args = parser.parse_args()
@@ -2122,10 +2136,27 @@ def main():
     if not args.report_dir:
         args.report_dir = f"tests/reports/qa-{datetime.now():%Y%m%d-%H%M%S}"
 
+    # Create executor based on --executor flag
+    exec_instance = None
+    if args.executor == "avd":
+        from executors.avd import AVDExecutor
+        exec_instance = AVDExecutor(
+            apk_path=args.apk or "",
+            package=args.package or "",
+        )
+    elif args.executor == "device":
+        from executors.device import DeviceExecutor
+        exec_instance = DeviceExecutor(
+            apk_path=args.apk or "",
+            package=args.package or "",
+            device_id=args.device or "",
+        )
+    # else: web (default) — created inside run_agent if executor is None
+
     run_agent(url, provider, model, items, args.report_dir,
               credentials=creds, dashboard_port=args.dashboard_port,
               no_dashboard=args.no_dashboard, ollama_url=ollama_url,
-              visual=args.visual)
+              visual=args.visual, executor=exec_instance)
 
 
 def _run_comparison(args, url, creds, items, ollama_url):

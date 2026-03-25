@@ -2,5 +2,6 @@
 
 from .base import BaseExecutor
 from .web import WebExecutor
+from .avd import AVDExecutor
 
-__all__ = ["BaseExecutor", "WebExecutor"]
+__all__ = ["BaseExecutor", "WebExecutor", "AVDExecutor"]
