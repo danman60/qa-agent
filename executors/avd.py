@@ -49,16 +49,33 @@ class AVDExecutor(BaseExecutor):
         if rc != 0:
             return False
 
-        # Find device serial if not specified
+        # Find device serial if not specified — prefer emulator over real devices
         if not self.serial:
+            emulators = []
+            devices = []
             lines = stdout.split("\n")[1:]  # skip header
             for line in lines:
                 parts = line.split("\t")
                 if len(parts) >= 2 and parts[1].strip() == "device":
-                    self.serial = parts[0].strip()
-                    break
-            if not self.serial:
-                return False
+                    serial = parts[0].strip()
+                    if serial.startswith("emulator-"):
+                        emulators.append(serial)
+                    else:
+                        devices.append(serial)
+            # Prefer emulator when testing APKs
+            if emulators:
+                self.serial = emulators[0]
+            elif not devices:
+                # No devices at all — boot an emulator
+                if not self._boot_emulator():
+                    return False
+            else:
+                # Only real devices available — still boot an emulator for APK testing
+                if self.apk_path:
+                    if not self._boot_emulator():
+                        self.serial = devices[0]  # fallback to real device
+                else:
+                    self.serial = devices[0]
 
         # Get screen size
         stdout, _, _ = _adb(["shell", "wm", "size"], serial=self.serial)
@@ -136,8 +153,14 @@ class AVDExecutor(BaseExecutor):
         return path
 
     def click(self, role: str, name: str) -> tuple[bool, str]:
-        """Find element by role+name in uiautomator XML and tap its center."""
+        """Find element by role+name in uiautomator XML and tap its center.
+        Falls back to text-only search if role+name fails."""
         bounds = self._find_element_bounds(role=role, name=name)
+        if bounds:
+            x, y = self._bounds_center(bounds)
+            return self._tap(x, y)
+        # Fallback: try text-only match (ignores role constraint)
+        bounds = self._find_element_bounds(text=name)
         if bounds:
             x, y = self._bounds_center(bounds)
             return self._tap(x, y)
@@ -179,8 +202,8 @@ class AVDExecutor(BaseExecutor):
         """Press a key via adb keyevent."""
         keymap = {
             "Enter": "KEYCODE_ENTER", "Tab": "KEYCODE_TAB",
-            "Escape": "KEYCODE_ESCAPE", "Backspace": "KEYCODE_DEL",
-            "Delete": "KEYCODE_FORWARD_DEL",
+            "Escape": "KEYCODE_BACK", "Back": "KEYCODE_BACK",
+            "Backspace": "KEYCODE_DEL", "Delete": "KEYCODE_FORWARD_DEL",
         }
         keycode = keymap.get(key, f"KEYCODE_{key.upper()}")
         _adb(["shell", "input", "keyevent", keycode], serial=self.serial)
@@ -259,6 +282,50 @@ class AVDExecutor(BaseExecutor):
 
     # ── Internal helpers ──
 
+    def _boot_emulator(self, timeout: int = 90) -> bool:
+        """Boot an Android emulator. Returns True if emulator is ready."""
+        # Find available AVDs
+        try:
+            result = subprocess.run(["emulator", "-list-avds"],
+                                     capture_output=True, text=True, timeout=10)
+            avds = [a.strip() for a in result.stdout.strip().split("\n") if a.strip()]
+        except Exception:
+            return False
+
+        if not avds:
+            return False
+
+        # Prefer 'pixel-phone' or 'test-device', else use first available
+        avd = avds[0]
+        for preferred in ["pixel-phone", "test-device"]:
+            if preferred in avds:
+                avd = preferred
+                break
+
+        # Launch emulator in background
+        subprocess.Popen(
+            ["emulator", "-avd", avd, "-no-window", "-no-audio",
+             "-no-boot-anim", "-gpu", "swiftshader_indirect"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+        # Wait for emulator to boot
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(5)
+            stdout, _, _ = _adb(["devices"], timeout=10)
+            for line in stdout.split("\n")[1:]:
+                parts = line.split("\t")
+                if (len(parts) >= 2 and parts[1].strip() == "device"
+                        and parts[0].strip().startswith("emulator-")):
+                    self.serial = parts[0].strip()
+                    # Check boot completed
+                    out, _, _ = _adb(["shell", "getprop", "sys.boot_completed"],
+                                      serial=self.serial, timeout=5)
+                    if out.strip() == "1":
+                        return True
+        return False
+
     def _launch_app(self) -> bool:
         if self.activity:
             _, _, rc = _adb(["shell", "am", "start", "-n", self.activity], serial=self.serial)
@@ -267,8 +334,33 @@ class AVDExecutor(BaseExecutor):
                 "shell", "monkey", "-p", self.package,
                 "-c", "android.intent.category.LAUNCHER", "1"
             ], serial=self.serial)
-        time.sleep(3)
+        # Wait for app to fully render (Expo/RN apps need longer on emulator)
+        self._wait_for_app_ready()
         return rc == 0
+
+    def _wait_for_app_ready(self, timeout: int = 30) -> bool:
+        """Wait until the app has meaningful UI content (not just splash)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(2)
+            xml_str = self._get_ui_xml()
+            if not xml_str:
+                continue
+            try:
+                root = ET.fromstring(xml_str)
+            except ET.ParseError:
+                continue
+            # Count nodes with text or content-desc (meaningful UI)
+            meaningful = 0
+            for node in root.iter("node"):
+                pkg = node.get("package", "")
+                text = node.get("text", "")
+                desc = node.get("content-desc", "")
+                if pkg == self.package and (text or desc):
+                    meaningful += 1
+            if meaningful >= 3:
+                return True
+        return False
 
     def _detect_package(self) -> str:
         """Try to detect package name from installed APK via aapt or dumpsys."""
@@ -322,6 +414,7 @@ class AVDExecutor(BaseExecutor):
             node_desc = node.get("content-desc", "")
             node_class = node.get("class", "")
             node_rid = node.get("resource-id", "")
+            node_clickable = node.get("clickable") == "true"
             bounds = node.get("bounds", "")
 
             if not bounds:
@@ -338,20 +431,23 @@ class AVDExecutor(BaseExecutor):
                 if (name_lower in node_text.lower() or
                     name_lower in node_desc.lower() or
                     name_lower in node_rid.lower()):
-                    # Optional role filter
+                    # Role filter: relax for clickable View/ViewGroup (React Native)
                     if role:
-                        if not self._matches_role(node_class, role):
+                        if not self._matches_role(node_class, role, node_clickable):
                             continue
                     return bounds
 
         return None
 
-    def _matches_role(self, android_class: str, web_role: str) -> bool:
-        """Map web accessibility roles to Android widget classes."""
+    def _matches_role(self, android_class: str, web_role: str,
+                       clickable: bool = False) -> bool:
+        """Map web accessibility roles to Android widget classes.
+        React Native renders most interactive elements as View/ViewGroup,
+        so clickable views match button/link/tab roles."""
         role_map = {
             "button": ["Button", "ImageButton", "FloatingActionButton", "MaterialButton"],
             "textbox": ["EditText", "TextInputEditText", "AutoCompleteTextView"],
-            "link": ["TextView"],  # Android doesn't have links per se
+            "link": ["TextView"],
             "checkbox": ["CheckBox", "SwitchCompat", "Switch"],
             "combobox": ["Spinner", "AutoCompleteTextView"],
             "heading": ["TextView"],
@@ -359,7 +455,16 @@ class AVDExecutor(BaseExecutor):
             "tab": ["TabView", "Tab"],
         }
         expected = role_map.get(web_role.lower(), [])
-        return any(e.lower() in android_class.lower() for e in expected) if expected else True
+        if not expected:
+            return True
+        if any(e.lower() in android_class.lower() for e in expected):
+            return True
+        # React Native: clickable View/ViewGroup acts as button/link/tab
+        if clickable and web_role.lower() in ("button", "link", "tab"):
+            cls_lower = android_class.lower()
+            if "view" in cls_lower:
+                return True
+        return False
 
     @staticmethod
     def _bounds_center(bounds_str: str) -> tuple[int, int]:

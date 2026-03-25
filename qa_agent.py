@@ -1204,18 +1204,22 @@ def _learn_gotchas(state):
             continue
         detail = item.result_detail.lower()
         # Suspicious: passed but reasoning contains negative language
-        suspicious_words = ["but", "however", "although", "not able", "couldn't",
-                            "still on", "unable", "no ", "didn't", "wasn't"]
-        if any(w in detail for w in suspicious_words):
-            # Extract the suspicious phrase (first 4 words after the negative word)
-            for w in suspicious_words:
-                idx = detail.find(w)
-                if idx >= 0:
-                    snippet = detail[idx:idx+40].split(".")[0].strip()
-                    if len(snippet) > 5:
-                        save_gotcha(snippet, f"false pass on: {item.description[:50]}")
-                        learned += 1
-                        break
+        # Use word-boundary patterns to avoid matching substrings (e.g. "but" in "buttons")
+        suspicious_patterns = [
+            r"\bbut\b", r"\bhowever\b", r"\balthough\b", r"\bnot able\b",
+            r"\bcouldn't\b", r"\bstill on\b", r"\bunable\b",
+            r"\bdidn't\b", r"\bwasn't\b",
+        ]
+        for pattern in suspicious_patterns:
+            m = re.search(pattern, detail)
+            if m:
+                idx = m.start()
+                snippet = detail[idx:idx+40].split(".")[0].strip()
+                # Require meaningful length and avoid learning app content as gotchas
+                if len(snippet) > 10:
+                    save_gotcha(snippet, f"false pass on: {item.description[:50]}")
+                    learned += 1
+                    break
     if learned:
         state.log(f"Learned {learned} new gotcha(s) → {GOTCHAS_FILE.name}", "info")
 
@@ -1262,7 +1266,17 @@ def run_agent(url, provider, model, checklist_items, report_dir,
         return state
     state.log(f"Executor launched ({executor.__class__.__name__})", "success")
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    sys_prompt = SYSTEM_PROMPT
+    # Android-specific additions
+    if not isinstance(executor, WebExecutor):
+        sys_prompt += """
+
+## Android-specific actions
+- BACK — press the Android back button to return to the previous screen. Use this when there's no visible back/home button. Usage: {"action": "PRESS", "value": "Back", "reasoning": "pressing back to return"}
+- On Android, elements may be ViewGroup or View with content-desc labels. Match by the text in content-desc.
+- If a button/tab is not found, try using the text portion of the label (e.g. "Progress" instead of "⏷, Progress").
+"""
+    messages = [{"role": "system", "content": sys_prompt}]
 
     # Login (web-specific — Android apps handle auth via checklist steps)
     login_ok = True
