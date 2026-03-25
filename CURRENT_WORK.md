@@ -1,55 +1,48 @@
 # Current Work - QA Agent
 
-## Last Session Summary (2026-03-25)
-Implemented executor abstraction for unified web + Android testing. All 6 phases of the plan at docs/plans/2026-03-25-executor-abstraction.md completed — pluggable executors (web, AVD, device), CLI flags, skill rewrites, projects.json platform field.
+## Last Session Summary (2026-03-25 evening)
+LilLearner APK end-to-end test: diagnosed crash (missing JS bundle), fixed APK build, fixed AVD executor for React Native apps, achieved 11/11 PASS.
 
-## What Changed
-- `9987238` refactor: extract web executor — created executors/ package with BaseExecutor, WebExecutor
-- `1672299` feat: AVD executor — ADB-based Android emulator testing via uiautomator
-- `d7b4ef5` feat: device executor — real phone testing via PhoneFarm registry + Tailscale ADB
-- `eeda73b` feat: platform field in projects.json, auto-select executor in dashboard server
+## What Changed This Session
+- `29b2332` fix: AVD executor React Native compatibility + emulator auto-boot
+
+### APK Fix (LilLearner)
+- Root cause: debug APK had no JS bundle — Expo's `debuggableVariants` defaults to `["debug"]` which skips bundling
+- Fix: set `debuggableVariants = []` in `android/app/build.gradle` + ran `expo prebuild --clean` + `./gradlew assembleDebug`
+
+### AVD Executor (executors/avd.py)
+- Auto-boot emulator (pixel-phone AVD) if none running
+- Prefer `emulator-*` serial over real phones
+- Wait for app ready: polls until 3+ meaningful UI nodes from uiautomator
+- React Native click support: clickable View/ViewGroup matches button/link/tab roles
+- Text fallback: click() falls back to text-only when role+name fails
+- Escape/Back → KEYCODE_BACK for Android navigation
+- Android system prompt: BACK action docs for non-web executors
+
+### QA Agent Core (qa_agent.py)
+- Gotcha learner: word-boundary matching (`\bbut\b` not `but`), min 10-char snippets
+- Android prompt injection for non-WebExecutor sessions
 
 ## Build Status
-PASSING — all imports verified, CLI --help works, no syntax errors
+PASSING — 11/11 on LilLearner APK (report: tests/reports/qa-20260325-165208/)
 
 ## Known Bugs & Issues
 - Old `Browser` class in qa_agent.py is dead code (lines ~559-726) — remove in cleanup pass
-- `do_login()` uses `executor.page_handle` (WebExecutor-specific) — won't work if AVD executor passed with credentials
-- Android auto-checklist `generate_auto_checklist()` produces web-specific items — needs Android equivalent
-
-## Incomplete Work
-- No end-to-end test of AVD executor on real APK (emulator not running this session)
-- No test of device executor on Pixel 7 Pro
-- `--device all` multi-device mode in `run_on_all_devices()` not wired into CLI main()
-
-## Tests
-- Not run this session (structural refactor, verified via import checks only)
-- All 3 executors need real-world testing
+- `do_login()` uses `executor.page_handle` (WebExecutor-specific)
+- `generate_auto_checklist()` produces web-specific items for Android — needs Android equivalent
+- Gotcha learner still too aggressive on app content strings ("No reports yet")
 
 ## Next Steps (priority order)
-1. Test AVD executor on LilLearner APK on emulator
+1. Add crash detection to AVD executor (check foreground app matches package after each step)
 2. Test device executor on Pixel 7 Pro via Tailscale
 3. Remove dead Browser class from qa_agent.py
 4. Create Android-specific auto-checklist generator
 5. Wire `--device all` into CLI main()
-6. Playlist feature (from previous session plan — see below)
+6. Playlist feature (deferred)
 
-## Gotchas for Next Session
-- Skill files (test-webapp, android-apk-testing) are at ~/.claude/skills/ — outside this repo
-- PhoneFarm device registry: ~/projects/phonefarm/data/devices.json — only has pixel7
-- AVD executor's `_xml_to_text()` mimics Playwright aria_snapshot format so same LLM system prompt works for both platforms
-- The `--server` mode is live at http://100.122.177.91:9876
-
-## Files Touched This Session
-- executors/__init__.py (created)
-- executors/base.py (created)
-- executors/web.py (created)
-- executors/avd.py (created)
-- executors/device.py (created)
-- qa_agent.py (modified — executor interface, CLI flags, platform detection)
-- projects.json (modified — added platform field, LilLearner entry)
-- ~/.claude/skills/test-webapp/SKILL.md (rewritten)
-- ~/.claude/skills/android-apk-testing/SKILL.md (rewritten)
+## Artifacts
+- Checklist: `checklists/lillearner-android.md` (11 items)
+- LilLearner bundled APK: `/home/danman60/projects/LilLearner/android/app/build/outputs/apk/debug/app-debug.apk`
 
 ## Architecture
 ```
@@ -64,12 +57,6 @@ qa_agent.py (orchestrator — platform agnostic)
 ├── gotchas.md        (auto-learned fail phrases)
 └── checklists/       (flat checklist files)
 ```
-
-## Deferred: Test Playlist Feature
-- Run multiple tests sequentially from server UI
-- `playlists.json` — saved playlist configs
-- Dashboard playlist progress bar + per-test score cards
-- POST /api/playlist/run — accepts playlist_id
 
 ## Environment
 - PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright
