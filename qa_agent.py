@@ -38,6 +38,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", os.path.expanduser("~/.cache/ms-playwright"))
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from executors.web import WebExecutor
 
 # ═══════════════════════════════════════════════════════════════════
 # Config
@@ -751,8 +752,8 @@ def parse_response(response):
     return {"action": "NONE", "role": "", "name": "", "value": "", "reasoning": response[:80]}
 
 
-def execute_action(browser, action):
-    """Execute a parsed action on the browser. Returns (success, detail)."""
+def execute_action(executor, action):
+    """Execute a parsed action on the executor. Returns (success, detail)."""
     cmd = action["action"]
     role = action.get("role", "")
     name = action.get("name", "")
@@ -760,27 +761,27 @@ def execute_action(browser, action):
 
     if cmd == "CLICK":
         if role and name:
-            return browser.click(role, name)
+            return executor.click(role, name)
         elif name:
-            return browser.click_text(name)
+            return executor.click_text(name)
         return False, "CLICK needs role+name"
 
     elif cmd == "FILL":
         if not value:
             return False, "FILL needs a value"
-        return browser.fill(role or "textbox", name, value)
+        return executor.fill(role or "textbox", name, value)
 
     elif cmd == "TYPE":
-        return browser.type_text(value or name)
+        return executor.type_text(value or name)
 
     elif cmd == "PRESS":
-        return browser.press_key(value or name)
+        return executor.press_key(value or name)
 
     elif cmd == "SCROLL":
-        return browser.scroll(value or "down")
+        return executor.scroll(value or "down")
 
     elif cmd == "SELECT":
-        return browser.select_option(role or "combobox", name, value)
+        return executor.select_option(role or "combobox", name, value)
 
     elif cmd == "VERIFY":
         return True, action.get("reasoning", "verified")
@@ -814,9 +815,10 @@ def ask_llm(provider, model, snapshot, task, messages):
     return parse_response(response), mt, response
 
 
-def _try_token_injection(browser, state, credentials, login_url):
+def _try_token_injection(executor, state, credentials, login_url):
     """Get a Supabase session token via API and inject into browser localStorage.
-    Returns True if injection succeeded and browser is now at dashboard."""
+    Returns True if injection succeeded and browser is now at dashboard.
+    Requires a WebExecutor (uses page_handle/context_handle for Playwright-specific APIs)."""
     import urllib.request, json as _json
     supabase_url = credentials.get("supabase_url", "")
     service_key = credentials.get("supabase_service_key", "")
@@ -827,7 +829,12 @@ def _try_token_injection(browser, state, credentials, login_url):
     api_key = service_key or anon_key
     if not supabase_url:
         return False
+    # Token injection only works with WebExecutor
+    if not hasattr(executor, 'page_handle'):
+        return False
     state.log("  Token-injection login...", "action")
+    page = executor.page_handle
+    ctx = executor.context_handle
     try:
         # Option A: load pre-generated session from file
         if session_file and os.path.isfile(session_file):
@@ -863,13 +870,10 @@ def _try_token_injection(browser, state, credentials, login_url):
         domain = base_url.replace("https://", "").replace("http://", "")
         ref = supabase_url.replace("https://", "").split(".")[0]
         cookie_name = f"sb-{ref}-auth-token"
-        # Supabase SSR uses cookies (not just localStorage). Set the session cookie.
-        # The cookie value is the session JSON, URL-encoded.
         import urllib.parse as _urlparse
         cookie_value = _urlparse.quote(session_payload)
-        # Navigate to login page first to set cookies on the correct domain
-        browser.page.goto(login_url, wait_until="domcontentloaded")
-        browser.context.add_cookies([{
+        page.goto(login_url, wait_until="domcontentloaded")
+        ctx.add_cookies([{
             "name": cookie_name,
             "value": cookie_value,
             "domain": domain,
@@ -878,18 +882,15 @@ def _try_token_injection(browser, state, credentials, login_url):
             "secure": True,
             "sameSite": "Lax",
         }])
-        # Also set in localStorage as fallback for client-side Supabase
-        browser.page.evaluate(f"localStorage.setItem('sb-{ref}-auth-token', {_json.dumps(session_payload)});")
-        # Navigate to dashboard — server middleware should now see the cookie
-        browser.page.goto(base_url + "/dashboard", wait_until="domcontentloaded")
+        page.evaluate(f"localStorage.setItem('sb-{ref}-auth-token', {_json.dumps(session_payload)});")
+        page.goto(base_url + "/dashboard", wait_until="domcontentloaded")
         time.sleep(3)
-        if "/login" not in browser.url:
-            state.log(f"  Token-injection succeeded: {browser.url}", "result")
+        if "/login" not in executor.url:
+            state.log(f"  Token-injection succeeded: {executor.url}", "result")
             return True
-        # App may have cleared the token — try waiting longer
         try:
-            browser.page.wait_for_url(lambda u: "/login" not in u, timeout=8000)
-            state.log(f"  Token-injection succeeded after wait: {browser.url}", "result")
+            page.wait_for_url(lambda u: "/login" not in u, timeout=8000)
+            state.log(f"  Token-injection succeeded after wait: {executor.url}", "result")
             return True
         except Exception:
             pass
@@ -903,8 +904,9 @@ def _try_token_injection(browser, state, credentials, login_url):
     return False
 
 
-def do_login(browser, state, credentials):
-    """Deterministic harness-enforced login. No LLM needed."""
+def do_login(executor, state, credentials):
+    """Deterministic harness-enforced login. No LLM needed.
+    Works with WebExecutor (uses page_handle for Playwright-specific selectors)."""
     email = credentials.get("email", "")
     password = credentials.get("password", "")
     login_url = credentials.get("login_url", state.url.rstrip("/") + "/login")
@@ -916,18 +918,21 @@ def do_login(browser, state, credentials):
 
     # Try token injection first if Supabase credentials provided (avoids form rate limits)
     if credentials.get("supabase_url") and (credentials.get("supabase_service_key") or credentials.get("supabase_anon_key") or credentials.get("supabase_session_file")):
-        if _try_token_injection(browser, state, credentials, login_url):
-            state.log(f"Login succeeded (token injection): {browser.url}", "success")
-            state.pages_visited.add(browser.url)
+        if _try_token_injection(executor, state, credentials, login_url):
+            state.log(f"Login succeeded (token injection): {executor.url}", "success")
+            state.pages_visited.add(executor.url)
             return True
         state.log("  Token injection failed, falling back to form login...", "warn")
 
-    browser.goto(login_url)
+    executor.navigate(login_url)
+
+    # Web-specific form login using Playwright selectors
+    page = executor.page_handle
 
     # Fill email — try multiple selectors
     for selector in ['input[type="email"]', 'input[name="email"]', '[placeholder*="email" i]', 'input[type="text"]']:
         try:
-            el = browser.page.locator(selector).first
+            el = page.locator(selector).first
             if el.is_visible(timeout=2000):
                 el.fill(email)
                 state.log(f"  Email filled via {selector}", "result")
@@ -938,7 +943,7 @@ def do_login(browser, state, credentials):
     # Fill password
     for selector in ['input[type="password"]', 'input[name="password"]']:
         try:
-            el = browser.page.locator(selector).first
+            el = page.locator(selector).first
             if el.is_visible(timeout=2000):
                 el.fill(password)
                 state.log(f"  Password filled via {selector}", "result")
@@ -949,7 +954,7 @@ def do_login(browser, state, credentials):
     # Click submit
     for text in ["Sign In", "Log In", "Login", "Sign in", "Submit", "Log in"]:
         try:
-            btn = browser.page.get_by_role("button", name=text)
+            btn = page.get_by_role("button", name=text)
             if btn.is_visible(timeout=1000):
                 btn.click()
                 state.log(f"  Clicked '{text}'", "result")
@@ -959,46 +964,41 @@ def do_login(browser, state, credentials):
 
     # Wait for redirect OR page content change (some apps don't redirect)
     try:
-        browser.page.wait_for_url(lambda u: "/login" not in u, timeout=20000)
+        page.wait_for_url(lambda u: "/login" not in u, timeout=20000)
     except PWTimeout:
-        # URL didn't change — check if page content changed (SPA login)
         time.sleep(5)
 
-    state.log(f"  Post-login URL: {browser.url}", "result")
+    state.log(f"  Post-login URL: {executor.url}", "result")
 
-    # Verify: check URL first, then check for dashboard/nav content
-    if "/login" not in browser.url:
-        state.log(f"Login succeeded: {browser.url}", "success")
-        state.pages_visited.add(browser.url)
+    if "/login" not in executor.url:
+        state.log(f"Login succeeded: {executor.url}", "success")
+        state.pages_visited.add(executor.url)
         return True
 
-    # SPA fallback: URL may stay at /login but content changes
-    # Check if a sidebar/nav appeared (sign of authenticated state)
+    # SPA fallback
     try:
-        snap = browser.snapshot()
-        # Look for navigation elements that only appear after login
-        has_sidebar = bool(browser.page.locator('nav').count()) or 'navigation' in snap.lower()
+        snap = executor.snapshot()
+        has_sidebar = bool(page.locator('nav').count()) or 'navigation' in snap.lower()
         has_dashboard_link = 'link "Dashboard"' in snap or 'link "Home"' in snap
         if has_sidebar and has_dashboard_link:
-            # Navigate to dashboard explicitly
             try:
-                browser.page.get_by_role("link", name="Dashboard").first.click()
+                page.get_by_role("link", name="Dashboard").first.click()
                 time.sleep(2)
-                state.log(f"Login succeeded (SPA → navigated to dashboard): {browser.url}", "success")
-                state.pages_visited.add(browser.url)
+                state.log(f"Login succeeded (SPA → navigated to dashboard): {executor.url}", "success")
+                state.pages_visited.add(executor.url)
                 return True
             except Exception:
-                state.log(f"Login succeeded (SPA, URL unchanged): {browser.url}", "success")
-                state.pages_visited.add(browser.url)
+                state.log(f"Login succeeded (SPA, URL unchanged): {executor.url}", "success")
+                state.pages_visited.add(executor.url)
                 return True
     except Exception:
         pass
 
-    state.log(f"Login failed — still at {browser.url}", "error")
+    state.log(f"Login failed — still at {executor.url}", "error")
     return False
 
 
-def execute_checklist_item(browser, item, state, provider, model, messages):
+def execute_checklist_item(executor, item, state, provider, model, messages):
     """Execute one checklist item. Harness enforces: snapshot → LLM → act → verdict."""
     item.status = "running"
     state.log(f"\n{'='*50}", "info")
@@ -1011,8 +1011,8 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
         task += f". Instructions: {item.how}"
 
     # Harness: clear console/network errors for this step
-    browser.get_console_errors(since_last=True)
-    browser.get_network_errors(since_last=True)
+    executor.get_console_errors(since_last=True)
+    executor.get_network_errors(since_last=True)
 
     success = False
     last_result = ""
@@ -1046,13 +1046,13 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
             return
 
         # 1. HARNESS: Snapshot
-        snapshot = browser.snapshot()
+        snapshot = executor.snapshot()
         item.snapshot_excerpt = snapshot[:300]
-        item.url = browser.url
-        state.pages_visited.add(browser.url)
+        item.url = executor.url
+        state.pages_visited.add(executor.url)
 
         # Discover nav links
-        state.nav_links.update(browser.discover_links(snapshot))
+        state.nav_links.update(executor.discover_links(snapshot))
 
         # 2. LLM: What to do?
         full_task = f"Attempt {attempt}/{item.max_attempts}. {task}"
@@ -1101,7 +1101,7 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
                 continue
 
         t1 = time.time()
-        ok, detail = execute_action(browser, action)
+        ok, detail = execute_action(executor, action)
         item.action_time += time.time() - t1
         item.attempts = attempt
 
@@ -1118,7 +1118,7 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
                 success = True
                 break
             # Non-VERIFY success (CLICK, FILL, etc) — track URL, continue to verify
-            new_url = browser.url
+            new_url = executor.url
             if new_url != item.url:
                 state.pages_visited.add(new_url)
                 state.log(f"  Nav: {new_url}", "info")
@@ -1131,8 +1131,8 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
     # 4. HARNESS ENFORCES VERDICT
 
     # Collect console/network errors for this step
-    ce = browser.get_console_errors()
-    ne = browser.get_network_errors()
+    ce = executor.get_console_errors()
+    ne = executor.get_network_errors()
     if ce:
         item.console_errors = ce
         state.all_console_errors.extend(ce)
@@ -1144,7 +1144,7 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
     sc_name = f"step-{item.step_id}-{'pass' if success else 'fail'}.png"
     sc_path = str(state.report_dir / "screenshots" / sc_name)
     try:
-        browser.screenshot(sc_path)
+        executor.screenshot(sc_path)
         item.screenshot = sc_path
     except Exception:
         pass
@@ -1162,7 +1162,7 @@ def execute_checklist_item(browser, item, state, provider, model, messages):
         state.log(f"  FAIL: {item.description} — {item.result_detail[:80]}", "error")
 
 
-def run_harness_checks(browser, state):
+def run_harness_checks(executor, state):
     """Run harness-level checks that don't need the LLM. Appended to checklist results."""
     # Console error summary
     if state.all_console_errors:
@@ -1179,13 +1179,13 @@ def run_harness_checks(browser, state):
     # Mobile viewport check
     try:
         state.log("Testing mobile viewport (375x812)...", "action")
-        browser.set_viewport(375, 812)
+        executor.set_viewport(375, 812)
         time.sleep(1)
-        snap = browser.snapshot()
+        snap = executor.snapshot()
         sc_path = str(state.report_dir / "screenshots" / "mobile-viewport.png")
-        browser.screenshot(sc_path)
+        executor.screenshot(sc_path)
         state.log(f"  Mobile screenshot saved: {sc_path}", "success")
-        browser.set_viewport(1280, 720)  # Reset
+        executor.set_viewport(1280, 720)  # Reset
     except Exception as e:
         state.log(f"  Mobile viewport check failed: {e}", "error")
 
@@ -1252,9 +1252,9 @@ def run_agent(url, provider, model, checklist_items, report_dir,
         except Exception as e:
             state.log(f"Dashboard failed: {e}", "warn")
 
-    # Launch browser
-    browser = Browser(visual=visual)
-    browser.launch()
+    # Launch executor
+    executor = WebExecutor(visual=visual)
+    executor.setup()
     state.log("Browser launched", "success")
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -1262,11 +1262,11 @@ def run_agent(url, provider, model, checklist_items, report_dir,
     # Login
     login_ok = True
     if credentials and credentials.get("email"):
-        if not do_login(browser, state, credentials):
+        if not do_login(executor, state, credentials):
             state.log("Login FAILED — skipping all items that require auth", "error")
             login_ok = False
     else:
-        browser.goto(url)
+        executor.navigate(url)
         state.pages_visited.add(url)
 
     # Execute checklist
@@ -1281,10 +1281,10 @@ def run_agent(url, provider, model, checklist_items, report_dir,
             item.result_detail = "Skipped: login prerequisite failed"
             state.log(f"  SKIP: {item.description} (login failed)", "warn")
             continue
-        execute_checklist_item(browser, item, state, provider, model, messages)
+        execute_checklist_item(executor, item, state, provider, model, messages)
 
     # Harness-level checks
-    run_harness_checks(browser, state)
+    run_harness_checks(executor, state)
 
     # Reports
     state.write_reports()
@@ -1294,7 +1294,7 @@ def run_agent(url, provider, model, checklist_items, report_dir,
     # Learn gotchas: scan passed items for suspicious verdicts
     _learn_gotchas(state)
 
-    browser.close()
+    executor.teardown()
 
     if dashboard:
         state.log(f"Dashboard running at port {dashboard_port}. Ctrl+C to exit.", "info")
