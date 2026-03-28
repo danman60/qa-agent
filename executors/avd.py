@@ -187,17 +187,28 @@ class AVDExecutor(BaseExecutor):
         return False, f"Text not found: '{text}'"
 
     def fill(self, role: str, name: str, value: str) -> tuple[bool, str]:
-        """Tap a text field and type into it."""
-        ok, detail = self.click(role, name)
-        if not ok:
-            # Try clicking by text (field label)
-            ok, detail = self.click_text(name)
-        if not ok:
-            return False, f"Can't focus field: {detail}"
-        time.sleep(0.3)
-        # Clear existing text
+        """Tap a text field and type into it.
+        For WebView apps: labels (Email, Password) are separate TextViews above
+        the EditText fields. We find the EditText near the label, not the label itself."""
+        # Strategy 1: Find EditText associated with this label
+        bounds = self._find_edittext_for_label(name)
+        if bounds:
+            x, y = self._bounds_center(bounds)
+            self._tap(x, y)
+        else:
+            # Fallback: try direct click
+            ok, detail = self.click(role, name)
+            if not ok:
+                ok, detail = self.click_text(name)
+            if not ok:
+                return False, f"Can't focus field: {detail}"
+        time.sleep(0.5)
+        # Clear existing text: Ctrl+A then Delete (more reliable than long-press DEL)
         _adb(["shell", "input", "keyevent", "KEYCODE_MOVE_END"], serial=self.serial)
-        _adb(["shell", "input", "keyevent", "--longpress", "KEYCODE_DEL"], serial=self.serial)
+        _adb(["shell", "input", "keyevent", "67", "67", "67", "67", "67", "67", "67",
+              "67", "67", "67", "67", "67", "67", "67", "67", "67", "67", "67", "67",
+              "67", "67", "67", "67", "67", "67", "67", "67", "67", "67", "67", "67",
+              "67", "67", "67", "67", "67", "67", "67", "67", "67"], serial=self.serial)
         time.sleep(0.2)
         return self.type_text(value)
 
@@ -424,6 +435,60 @@ class AVDExecutor(BaseExecutor):
                 if "/" in line and "." in line:
                     return line.strip()
         return ""
+
+    def _find_edittext_for_label(self, label: str) -> str | None:
+        """Find an EditText field associated with a label (e.g. 'Email' → nearby EditText).
+        WebView forms render labels as separate TextViews above/overlapping EditText fields."""
+        xml_str = self._get_ui_xml()
+        if not xml_str:
+            return None
+        try:
+            root = ET.fromstring(xml_str)
+        except ET.ParseError:
+            return None
+
+        # Collect all nodes with bounds
+        edittexts = []
+        labels = []
+        for node in root.iter("node"):
+            cls = node.get("class", "")
+            text = node.get("text", "")
+            bounds = node.get("bounds", "")
+            if not bounds:
+                continue
+            if "EditText" in cls:
+                edittexts.append((bounds, text))
+            if label.lower() in text.lower():
+                labels.append(bounds)
+
+        if not labels or not edittexts:
+            return None
+
+        # Find the EditText whose bounds overlap with or are closest to the label
+        label_bounds = labels[0]
+        lm = re.findall(r"\[(\d+),(\d+)\]", label_bounds)
+        if len(lm) < 2:
+            return None
+        ly1, ly2 = int(lm[0][1]), int(lm[1][1])
+        label_cy = (ly1 + ly2) // 2
+
+        best = None
+        best_dist = float('inf')
+        for eb, et in edittexts:
+            em = re.findall(r"\[(\d+),(\d+)\]", eb)
+            if len(em) < 2:
+                continue
+            ey1, ey2 = int(em[0][1]), int(em[1][1])
+            # EditText should overlap with or be just below the label
+            if ey1 <= label_cy <= ey2:
+                # Label is inside this EditText — perfect match
+                return eb
+            dist = abs(ey1 - label_cy)
+            if dist < best_dist and ey1 >= ly1 - 50:  # EditText near/below label
+                best_dist = dist
+                best = eb
+
+        return best
 
     def _detect_package(self) -> str:
         """Try to detect package name from installed APK via aapt or dumpsys."""

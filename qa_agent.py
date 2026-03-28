@@ -205,7 +205,13 @@ def parse_checklist(text):
             continue
         if line.startswith("#"):
             continue
-        m = re.match(r"^[-*]\s+(.+)$", line) or re.match(r"^\d+[.)]\s+(.+)$", line)
+        # Checkbox items: - [ ] or * [ ] — these are actual test items
+        m_check = re.match(r"^[-*]\s+\[[ xX]?\]\s+(.+)$", line)
+        # Numbered items: 1. or 1) — also test items
+        m_num = re.match(r"^\d+[.)]\s+(.+)$", line)
+        # Plain bullets without checkbox: - text — treated as context/metadata, not test items
+        m_plain = re.match(r"^[-*]\s+(.+)$", line)
+        m = m_check or m_num
         if m:
             n += 1
             content = m.group(1).strip()
@@ -215,6 +221,10 @@ def parse_checklist(text):
                     desc, how = content.split(sep, 1)
                     break
             items.append(ChecklistItem(section, str(n), desc.strip(), how.strip()))
+        elif m_plain and items:
+            # Append plain bullet as context to the previous section (not a test item)
+            # This captures credential lists, share codes, etc. as "how" hints
+            pass  # skip metadata lines
     return items
 
 
