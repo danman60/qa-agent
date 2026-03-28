@@ -2121,11 +2121,29 @@ def main():
             srv.shutdown()
         return
 
-    if not args.url:
+    if not args.url and args.executor == "web":
         url, provider, model, ollama_url, creds, items = interactive_setup()
         if args.compare:
             _run_comparison(args, url, creds, items, ollama_url)
             return
+    elif not args.url and args.executor in ("avd", "device"):
+        # AVD/device executors don't need a URL — use package name as placeholder
+        url = f"app://{args.package or 'unknown'}"
+        provider = args.provider
+        model = args.model
+        ollama_url = args.ollama_url
+        creds = {}
+        items = []
+        if args.checklist and os.path.isfile(args.checklist):
+            with open(args.checklist) as f:
+                items = parse_checklist(f.read())
+        elif args.checklist and args.checklist.endswith('.md'):
+            with open(args.checklist) as f:
+                steps = parse_flow_file(f.read())
+                if steps:
+                    items = flow_to_checklist(steps)
+        if not items:
+            items = [{"id": 1, "text": "Launch app and verify main screen loads", "status": "pending"}]
     else:
         url = args.url
         provider = args.provider

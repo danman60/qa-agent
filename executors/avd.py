@@ -83,6 +83,9 @@ class AVDExecutor(BaseExecutor):
         if m:
             self._screen_size = (int(m.group(1)), int(m.group(2)))
 
+        # Dismiss any system dialogs (Google sign-in, etc.) before testing
+        self._dismiss_system_dialogs()
+
         # Install APK if provided
         if self.apk_path and os.path.isfile(self.apk_path):
             stdout, stderr, rc = _adb(["install", "-r", "-g", self.apk_path],
@@ -94,8 +97,17 @@ class AVDExecutor(BaseExecutor):
             if not self.package:
                 self.package = self._detect_package()
 
+        # Resolve actual installed package (debug builds append .debug suffix)
+        if self.package:
+            self.package = self._resolve_installed_package(self.package)
+
+        # Resolve main activity for reliable launch
+        if self.package and not self.activity:
+            self.activity = self._resolve_main_activity(self.package)
+
         # Launch app if we have a package
         if self.package:
+            self._dismiss_system_dialogs()
             self._launch_app()
 
         # Clear logcat baseline
@@ -336,6 +348,18 @@ class AVDExecutor(BaseExecutor):
             ], serial=self.serial)
         # Wait for app to fully render (Expo/RN apps need longer on emulator)
         self._wait_for_app_ready()
+        # Verify our app is actually in the foreground (not blocked by system dialog)
+        current = self._get_current_activity()
+        if self.package and self.package not in current:
+            # App got blocked by system UI — dismiss and retry once
+            self._dismiss_system_dialogs()
+            time.sleep(1)
+            if self.activity:
+                _adb(["shell", "am", "start", "-n", self.activity], serial=self.serial)
+            else:
+                _adb(["shell", "monkey", "-p", self.package,
+                      "-c", "android.intent.category.LAUNCHER", "1"], serial=self.serial)
+            time.sleep(3)
         return rc == 0
 
     def _wait_for_app_ready(self, timeout: int = 30) -> bool:
@@ -361,6 +385,45 @@ class AVDExecutor(BaseExecutor):
             if meaningful >= 3:
                 return True
         return False
+
+    def _dismiss_system_dialogs(self):
+        """Dismiss Google sign-in, system dialogs, and return to home."""
+        _adb(["shell", "am", "broadcast", "-a",
+              "android.intent.action.CLOSE_SYSTEM_DIALOGS"], serial=self.serial)
+        time.sleep(0.5)
+        # Press back a few times to escape any overlay
+        for _ in range(3):
+            _adb(["shell", "input", "keyevent", "KEYCODE_BACK"], serial=self.serial)
+            time.sleep(0.3)
+        _adb(["shell", "input", "keyevent", "KEYCODE_HOME"], serial=self.serial)
+        time.sleep(0.5)
+
+    def _resolve_installed_package(self, package: str) -> str:
+        """Check if the exact package is installed; if not, try .debug suffix."""
+        stdout, _, _ = _adb(["shell", "pm", "list", "packages"], serial=self.serial)
+        installed = [line.replace("package:", "").strip()
+                     for line in stdout.split("\n") if line.startswith("package:")]
+        if package in installed:
+            return package
+        # Try debug variant
+        debug_pkg = package + ".debug"
+        if debug_pkg in installed:
+            return debug_pkg
+        # Try partial match
+        for pkg in installed:
+            if pkg.startswith(package):
+                return pkg
+        return package  # fallback to original
+
+    def _resolve_main_activity(self, package: str) -> str:
+        """Use cmd package resolve-activity to find the main/launcher activity."""
+        stdout, _, rc = _adb(["shell", "cmd", "package", "resolve-activity",
+                               "--brief", package], serial=self.serial)
+        if rc == 0:
+            for line in stdout.split("\n"):
+                if "/" in line and "." in line:
+                    return line.strip()
+        return ""
 
     def _detect_package(self) -> str:
         """Try to detect package name from installed APK via aapt or dumpsys."""
