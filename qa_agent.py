@@ -119,6 +119,7 @@ SYSTEM_PROMPT = """You are a browser testing agent. You receive a page snapshot 
 ```
 
 ## Available actions
+- NAVIGATE — go directly to a URL. value = absolute or path URL (e.g. value="http://localhost:3000/metrics" or value="/metrics"). Use this when the task says "Navigate to <url>" and there is no matching link in the snapshot.
 - CLICK — role + name of element to click (e.g. role="link", name="Dashboard")
 - FILL — role="textbox", name = field label, value = text to enter
 - TYPE — type into focused element. value = text (no role/name needed)
@@ -769,6 +770,21 @@ def execute_action(executor, action):
     role = action.get("role", "")
     name = action.get("name", "")
     value = action.get("value", "")
+
+    if cmd == "NAVIGATE":
+        target = value or name
+        if not target:
+            return False, "NAVIGATE needs a url value"
+        # Resolve bare paths against the executor's current origin.
+        if target.startswith("/"):
+            try:
+                from urllib.parse import urlparse
+                cur = urlparse(executor.url)
+                target = f"{cur.scheme}://{cur.netloc}{target}"
+            except Exception:
+                pass
+        ok = executor.navigate(target)
+        return ok, (f"navigated to {target}" if ok else f"navigation failed: {target}")
 
     if cmd == "CLICK":
         if role and name:

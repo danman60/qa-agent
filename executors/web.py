@@ -71,6 +71,12 @@ class WebExecutor(BaseExecutor):
     def click(self, role: str, name: str) -> tuple[bool, str]:
         try:
             el = self.page.get_by_role(role, name=name)
+            # Tolerate multiple matches (e.g. a nav link duplicated in-page).
+            try:
+                if el.count() > 1:
+                    el = el.first
+            except Exception:
+                pass
             self._highlight(el)
             el.click(timeout=5000)
             time.sleep(0.5)
@@ -91,6 +97,11 @@ class WebExecutor(BaseExecutor):
     def fill(self, role: str, name: str, value: str) -> tuple[bool, str]:
         try:
             el = self.page.get_by_role(role, name=name)
+            try:
+                if el.count() > 1:
+                    el = el.first
+            except Exception:
+                pass
             self._highlight(el)
             el.fill(value, timeout=5000)
             return True, "filled"
