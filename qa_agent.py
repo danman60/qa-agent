@@ -53,12 +53,43 @@ NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NIM_KEY = os.environ.get("NIM_API_KEY", "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")
 NIM_MODEL = "moonshotai/kimi-k2.5"
 
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+def _load_anthropic_key():
+    k = os.environ.get("ANTHROPIC_API_KEY", "")
+    if k:
+        return k
+    try:
+        for line in (Path.home() / ".env.keys").read_text().splitlines():
+            if line.startswith("ANTHROPIC_API_KEY="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+ANTHROPIC_KEY = _load_anthropic_key()
+ANTHROPIC_MODEL = "claude-opus-4-8"
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+def _load_key(name):
+    k = os.environ.get(name, "")
+    if k:
+        return k
+    try:
+        for line in (Path.home() / ".env.keys").read_text().splitlines():
+            if line.startswith(name + "="):
+                return line.split("=", 1)[1].strip()
+    except Exception:
+        pass
+    return ""
+OPENROUTER_KEY = _load_key("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = "anthropic/claude-opus-4.8"
+
 MODEL_MENU = [
     {"label": "qwen3-coder:30b", "host": "FIRMAMENT 4090", "desc": "fast, 193 tok/s", "provider": "ollama", "url": OLLAMA_URL},
     {"label": "qwen3.5:27b", "host": "FIRMAMENT 4090", "desc": "precise, 41 tok/s", "provider": "ollama", "url": OLLAMA_URL},
     {"label": "glm-4.7-flash", "host": "FIRMAMENT 4090", "desc": "marathon, 140 tok/s", "provider": "ollama", "url": OLLAMA_URL},
     {"label": "gemma3:12b", "host": "SPYBALLOON 3060", "desc": "lightweight, 39.5 tok/s", "provider": "ollama-local", "url": OLLAMA_LOCAL_URL},
     {"label": "Kimi K2.5", "host": "NVIDIA NIM cloud", "desc": "free cloud, 40 req/min", "provider": "nim", "url": None},
+    {"label": "claude-opus-4-8", "host": "Anthropic cloud", "desc": "smartest, accurate verify", "provider": "anthropic", "url": None},
 ]
 
 # ═══════════════════════════════════════════════════════════════════
@@ -189,7 +220,8 @@ class ChecklistItem:
 
 def parse_checklist(text):
     # Check if this is a flow file format
-    if "**Action:**" in text or "**Actions:**" in text:
+    if ("**Action:**" in text or "**Actions:**" in text
+            or re.search(r'(?m)^###\s+Actions?\s*$', text)):
         # Delegate to flow file parser
         steps = parse_flow_file(text)
         return flow_to_checklist(steps)
@@ -244,14 +276,18 @@ def parse_flow_file(text):
     current_field = None
     field_content = []
 
-    # Field patterns to detect (normalized to standard names)
+    # Field patterns to detect (normalized to standard names).
+    # Each field accepts bold-inline form (**Action:** ...) and heading form (### Action).
     field_patterns = {
-        'action': r'^\*\*(?:Action|Actions):\*\*\s*(.*)$',
-        'expected': r'^\*\*(?:Expected|Expect):\*\*\s*(.*)$',
-        'verify': r'^\*\*(?:Verify|Check|Assert):\*\*\s*(.*)$',
-        'console': r'^\*\*Console:\*\*\s*(.*)$',
-        'screenshot': r'^\*\*Screenshot:\*\*\s*(.*)$',
-        'depends_on': r'^\*\*DEPENDS_ON:\*\*\s*(.*)$',
+        'action': [r'^\*\*(?:Action|Actions):\*\*\s*(.*)$',
+                   r'^###\s+(?:Action|Actions)\s*$'],
+        'expected': [r'^\*\*(?:Expected|Expect):\*\*\s*(.*)$',
+                     r'^###\s+(?:Expected|Expect|Oracle)\b.*$'],
+        'verify': [r'^\*\*(?:Verify|Check|Assert):\*\*\s*(.*)$',
+                   r'^###\s+(?:Verify|Check|Assert)\b.*$'],
+        'console': [r'^\*\*Console:\*\*\s*(.*)$'],
+        'screenshot': [r'^\*\*Screenshot:\*\*\s*(.*)$'],
+        'depends_on': [r'^\*\*DEPENDS_ON:\*\*\s*(.*)$'],
     }
 
     def finalize_field():
@@ -294,15 +330,18 @@ def parse_flow_file(text):
 
         # Check for field headers
         field_matched = False
-        for field_name, pattern in field_patterns.items():
-            match = re.match(pattern, stripped, re.IGNORECASE)
-            if match:
-                finalize_field()
-                current_field = field_name
-                content = match.group(1) if match.groups() else ''
-                if content:
-                    field_content.append(content)
-                field_matched = True
+        for field_name, patterns in field_patterns.items():
+            for pattern in patterns:
+                match = re.match(pattern, stripped, re.IGNORECASE)
+                if match:
+                    finalize_field()
+                    current_field = field_name
+                    content = match.group(1) if match.groups() else ''
+                    if content:
+                        field_content.append(content)
+                    field_matched = True
+                    break
+            if field_matched:
                 break
 
         if field_matched:
@@ -343,8 +382,11 @@ def flow_to_checklist(steps):
         if len(desc) > 100:
             desc = desc[:97] + '...'
 
-        # Build how: Expected + Verify criteria
+        # Build how: full Action + Expected + Verify criteria
         how_parts = []
+        if action and '\n' in action:
+            # Multi-line actions carry essential instructions beyond the desc preview
+            how_parts.append(f"Action: {action}")
         if expected:
             how_parts.append(f"Expected: {expected}")
         if verify:
@@ -546,10 +588,51 @@ def chat_nim(messages, max_tokens=300):
         return json.loads(resp.read()).get("choices", [{}])[0].get("message", {}).get("content", "")
 
 
+def chat_anthropic(model, messages, max_tokens=300):
+    # Anthropic Messages API: system goes in top-level field, not in messages[].
+    sys_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    convo = [{"role": m["role"], "content": m["content"]}
+             for m in messages if m.get("role") in ("user", "assistant")]
+    body = {
+        "model": model or ANTHROPIC_MODEL,
+        "max_tokens": max(max_tokens, 1024),
+        "messages": convo,
+    }
+    if sys_parts:
+        body["system"] = "\n\n".join(sys_parts)
+    payload = json.dumps(body).encode()
+    req = urllib.request.Request(ANTHROPIC_URL, data=payload, headers={
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+    })
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        data = json.loads(resp.read())
+    parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
+    return "".join(parts)
+
+
+def chat_openrouter(model, messages, max_tokens=300):
+    payload = json.dumps({
+        "model": model or OPENROUTER_MODEL, "messages": messages,
+        "max_tokens": max(max_tokens, 1024), "stream": False,
+    }).encode()
+    req = urllib.request.Request(OPENROUTER_URL, data=payload, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {OPENROUTER_KEY}",
+    })
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        return json.loads(resp.read()).get("choices", [{}])[0].get("message", {}).get("content", "")
+
+
 def llm_chat(provider, model, messages, max_tokens=300):
     for attempt in range(3):
         try:
-            if provider == "nim":
+            if provider == "anthropic":
+                return chat_anthropic(model, messages, max_tokens)
+            elif provider == "openrouter":
+                return chat_openrouter(model, messages, max_tokens)
+            elif provider == "nim":
                 return chat_nim(messages, max_tokens)
             elif provider == "ollama-local":
                 return chat_ollama(model, messages, max_tokens, url=OLLAMA_LOCAL_URL)
@@ -897,18 +980,29 @@ def _try_token_injection(executor, state, credentials, login_url):
         domain = base_url.replace("https://", "").replace("http://", "")
         ref = supabase_url.replace("https://", "").split(".")[0]
         cookie_name = f"sb-{ref}-auth-token"
-        import urllib.parse as _urlparse
-        cookie_value = _urlparse.quote(session_payload)
+        # @supabase/ssr cookie format: "base64-" + base64url(JSON), chunked into
+        # name.0/name.1/... when over 3180 chars. URL-encoded JSON breaks SSR
+        # middleware parsing (redirect-to-login loop on cookie-session apps).
+        import base64 as _b64
+        encoded = "base64-" + _b64.urlsafe_b64encode(session_payload.encode()).decode().rstrip("=")
+        _CHUNK = 3180
+        if len(encoded) <= _CHUNK:
+            cookie_pairs = [(cookie_name, encoded)]
+        else:
+            cookie_pairs = [
+                (f"{cookie_name}.{i // _CHUNK}", encoded[i:i + _CHUNK])
+                for i in range(0, len(encoded), _CHUNK)
+            ]
         page.goto(login_url, wait_until="domcontentloaded")
         ctx.add_cookies([{
-            "name": cookie_name,
-            "value": cookie_value,
+            "name": cname,
+            "value": cval,
             "domain": domain,
             "path": "/",
             "httpOnly": False,
             "secure": True,
             "sameSite": "Lax",
-        }])
+        } for cname, cval in cookie_pairs])
         page.evaluate(f"localStorage.setItem('sb-{ref}-auth-token', {_json.dumps(session_payload)});")
         page.goto(base_url + "/dashboard", wait_until="domcontentloaded")
         time.sleep(3)
@@ -2095,7 +2189,7 @@ def main():
     parser.add_argument("--server", action="store_true",
                         help="Persistent dashboard server mode (project picker, run history)")
     parser.add_argument("--model", default="qwen3-coder:30b")
-    parser.add_argument("--provider", choices=["ollama", "ollama-local", "nim"], default="ollama")
+    parser.add_argument("--provider", choices=["ollama", "ollama-local", "nim", "anthropic", "openrouter"], default="ollama")
     parser.add_argument("--ollama-url", default=None)
     parser.add_argument("--report-dir", default=None)
     parser.add_argument("--checklist", default=None)
