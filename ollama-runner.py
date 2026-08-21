@@ -33,6 +33,10 @@ DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-6c421e24b1e644749a81d2666fd7239b")
 DEEPSEEK_MODEL = "deepseek-chat"
 MODEL_REGISTRY_PATH = Path.home() / "projects" / "sysadmin" / "model-registry.json"
+# How long ollama pins the model in VRAM after a request. Override per-run with
+# OLLAMA_KEEP_ALIVE=... . See the comment in ollama_chat(): omitting this costs a
+# full model reload (~123 s for a 19.3 GB model) on EVERY turn when VRAM is tight.
+OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 MAX_TURNS = 150
 MAX_TOOL_ERRORS = 10
 
@@ -222,7 +226,17 @@ TOOLS = [
 # Tool Execution
 # ═══════════════════════════════════════════════════════════════════
 
+def _normalize_path_key(args):
+    """Models sometimes use file_path, filepath, or filename instead of path."""
+    if "path" not in args:
+        for alt in ("file_path", "filepath", "filename", "file"):
+            if alt in args:
+                args["path"] = args[alt]
+                return
+        raise KeyError(f"No path key found in args: {list(args.keys())}")
+
 def exec_read_file(args):
+    _normalize_path_key(args)
     path = os.path.expanduser(args["path"])
     if not os.path.isfile(path):
         return f"ERROR: File not found: {path}"
@@ -238,6 +252,7 @@ def exec_read_file(args):
 
 
 def exec_write_file(args):
+    _normalize_path_key(args)
     path = os.path.expanduser(args["path"])
     content = args["content"]
     try:
@@ -250,6 +265,7 @@ def exec_write_file(args):
 
 
 def exec_edit_file(args):
+    _normalize_path_key(args)
     path = os.path.expanduser(args["path"])
     old = args["old_string"]
     new = args["new_string"]
@@ -277,7 +293,17 @@ def exec_bash(args):
     if any(b in cmd for b in blocked):
         return "ERROR: blocked destructive command"
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+        # Inject NVM/node paths so npx/tsc/node work in subprocess
+        env = os.environ.copy()
+        home = os.path.expanduser("~")
+        nvm_bin = os.path.join(home, ".nvm", "versions", "node")
+        if os.path.isdir(nvm_bin):
+            for entry in sorted(Path(nvm_bin).iterdir(), reverse=True):
+                bin_dir = entry / "bin"
+                if bin_dir.is_dir():
+                    env["PATH"] = str(bin_dir) + ":" + env.get("PATH", "")
+                    break  # Use newest node version
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60, env=env)
         output = result.stdout + result.stderr
         return output[:5000] if output else "(no output)"
     except subprocess.TimeoutExpired:
@@ -324,9 +350,21 @@ def ollama_chat(host, model, messages, tools=None, ctx_size=32768):
     }
     if tools:
         payload["tools"] = tools
-    # Suppress thinking mode for qwen models
-    if "qwen" in model.lower():
-        payload["options"]["think"] = False
+    # Suppress thinking mode. MUST be top-level, never inside options — proven
+    # 2026-08-19: options.think=False still emitted 360 chars of thinking on
+    # gemma4:12b; top-level think=False emitted 0. Thinking models otherwise
+    # write to message.thinking, leave message.content EMPTY, and burn the
+    # whole context budget (cost the vault run 24 failures / 22.6% pass rate).
+    # Applied to all models: ollama ignores think=False for non-thinking models.
+    payload["think"] = False
+    # Pin the model in VRAM between turns. MUST be top-level, like think.
+    # Proven 2026-08-21 on FIRMAMENT: without it, a 19.3 GB model on a 24.5 GB
+    # card (~3 GB held by the Windows desktop) is evicted after EVERY request,
+    # so every turn pays a full reload — measured load_duration ~123 s on three
+    # consecutive identical calls. With keep_alive it drops to 0.6 s then 0.2 s.
+    # api/ps LIES here: it reports the model loaded with a future expires_at
+    # the whole time. Diagnose with load_duration in the response, not api/ps.
+    payload["keep_alive"] = OLLAMA_KEEP_ALIVE
 
     data = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data,
@@ -695,7 +733,14 @@ def run(task_file, model, host, provider="ollama", ctx_size=None, fallback="none
 
     # Track original provider for fallback logic
     original_provider = provider
+    original_model = model
     has_switched = False
+
+    # Detect circular fallback (same provider+model) and auto-fix
+    if fallback == provider and (fallback_model == model or fallback_model is None):
+        status.log(f"WARNING: Circular fallback detected ({provider}/{model} → {fallback}/{fallback_model}), overriding to NIM")
+        fallback = "nim"
+        fallback_model = None
 
     status.log(f"Provider: {provider}")
     status.log(f"Model: {model}")
@@ -805,7 +850,9 @@ IMPORTANT: Respond with ONE tool call JSON per message. After each tool call, yo
         if "error" in resp:
             status.log(f"OLLAMA ERROR: {resp['error']}")
             tool_errors += 1
-            if tool_errors >= MAX_TOOL_ERRORS:
+            # Fast-fail on HTTP 500s: if 5+ errors in under 60s, skip to fallback immediately
+            error_threshold = 5 if "500" in str(resp.get("error", "")) else MAX_TOOL_ERRORS
+            if tool_errors >= error_threshold:
                 # Fallback: switch provider instead of dying
                 if fallback != "none" and not has_switched:
                     old_provider = provider
