@@ -38,6 +38,12 @@ MODEL_REGISTRY_PATH = Path.home() / "projects" / "sysadmin" / "model-registry.js
 # full model reload (~123 s for a 19.3 GB model) on EVERY turn when VRAM is tight.
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
 MAX_TURNS = 150
+
+# Populated by --contract. Drives both the injected API surface and the
+# post-write auto-repair. See extract_contract_surface().
+CONTRACT_MODULE = None      # e.g. "@/lib/contract"
+CONTRACT_SYMBOLS = set()    # every real exported name
+CONTRACT_SURFACE = None     # the generated block appended to the task prompt
 MAX_TOOL_ERRORS = 10
 
 
@@ -251,15 +257,157 @@ def exec_read_file(args):
         return f"ERROR: {e}"
 
 
+def extract_contract_surface(contract_path, module="@/lib/contract"):
+    """Build the API-surface block appended to every task prompt.
+
+    Measured 2026-08-22, 92 ladder runs across gemma4:12b and qwen3-coder:30b:
+    31 of 56 failures were the model inventing a key on the shared style object,
+    and 4 more were invented exports. Pasting the real surface took prose specs
+    from 0/6 to 5/6 and invented-API failures to zero, on BOTH models. It costs
+    ~1.4 KB, is identical for every task in a batch, and contains no component
+    code — so unlike a literal spec it amortises to nothing.
+
+    Scan line by line. A regex spanning the file is what produced the 2026-08-21
+    bug where a greedy match ran past an object's closing brace and reported 60
+    style keys where there were 11.
+
+    Returns (text, symbols).
+    """
+    lines = Path(contract_path).read_text().splitlines()
+    fns, consts, types, ifaces, objects = [], [], [], [], {}
+
+    for i, line in enumerate(lines):
+        m = re.match(r"^export function (\w+)\(([^)]*)\)(?:\s*:\s*([^{;]+))?", line)
+        if m:
+            sig = " ".join(m.group(2).split())
+            ret = (m.group(3) or "").strip()
+            fns.append((m.group(1), sig, ret))
+            continue
+        m = re.match(r"^export const (\w+)", line)
+        if m:
+            name = m.group(1)
+            consts.append(name)
+            if line.rstrip().endswith("{"):        # object literal -> collect its keys
+                keys = []
+                for nxt in lines[i + 1:]:
+                    if nxt.startswith("}"):
+                        break
+                    k = re.match(r"^  ([A-Za-z_]\w*)\s*:", nxt)
+                    if k:
+                        keys.append(k.group(1))
+                if keys:
+                    objects[name] = keys
+            continue
+        m = re.match(r"^export type (\w+)", line)
+        if m:
+            types.append(m.group(1))
+            continue
+        m = re.match(r"^export interface (\w+)", line)
+        if m:
+            ifaces.append(m.group(1))
+
+    def uniq(xs):
+        return list(dict.fromkeys(xs))
+
+    fns = [f for i, f in enumerate(fns) if f[0] not in {g[0] for g in fns[:i]}]
+    consts, types, ifaces = uniq(consts), uniq(types), uniq(ifaces)
+
+    out = [f"CONTRACT API SURFACE — `{module}` exports EXACTLY these. Nothing else exists.",
+           "Do NOT reference any symbol or object key that is not on this list.", ""]
+    if fns:
+        out.append("functions:")
+        out += [f"  {n}({a})" + (f": {r}" if r else "") for n, a, r in fns]
+        out.append("")
+    if consts:
+        out.append("consts: " + ", ".join(consts))
+    if types:
+        out.append("types: " + ", ".join(types))
+    if ifaces:
+        out.append("interfaces: " + ", ".join(ifaces))
+    for name, keys in objects.items():
+        out.append("")
+        out.append(f"{name} has EXACTLY these {len(keys)} keys: " + ", ".join(keys))
+
+    symbols = set(consts) | set(types) | set(ifaces) | {n for n, _, _ in fns}
+    return "\n".join(out), symbols
+
+
+def auto_repair(content, path):
+    """Fix the two mechanical failures that otherwise burn a whole retry.
+
+    Measured 2026-08-22 over 92 ladder runs: of 56 failures, 11 were React/JSX
+    import boilerplate and 6 were a REAL contract symbol used without being
+    imported. Both are pure text edits — no model round trip needed. The other
+    35 were invented API, which no repair can fix (hence --contract injection).
+
+    Returns (content, [notes]). Never raises; a repair that cannot be made
+    cleanly is skipped so the gate still sees the model's real output.
+    """
+    notes = []
+    if not path.endswith((".tsx", ".ts", ".jsx")):
+        return content, notes
+
+    # 1. Automatic JSX runtime: `import React` is never needed and errors.
+    out = []
+    for line in content.split("\n"):
+        s = line.strip()
+        if re.match(r"^import\s+React\s*(,|from)", s) or re.match(r"^import\s+\*\s+as\s+React\s+from", s):
+            notes.append("removed `import React` (automatic JSX runtime)")
+            continue
+        m = re.match(r"^(import\s*\{)([^}]*)(\}\s*from\s*['\"]react['\"];?)$", s)
+        if m and re.search(r"\bReact\b", m.group(2)):
+            names = [n.strip() for n in m.group(2).split(",")
+                     if n.strip() and n.strip() != "React"]
+            if not names:
+                notes.append("removed bare `{ React }` react import")
+                continue
+            line = f"{m.group(1)} {', '.join(names)} {m.group(3)}"
+            notes.append("stripped React from the react named-import")
+        out.append(line)
+    content = "\n".join(out)
+
+    # 2. Contract symbol referenced but never imported.
+    if CONTRACT_MODULE and CONTRACT_SYMBOLS:
+        pat = re.compile(r"^import\s*\{([^}]*)\}\s*from\s*['\"]"
+                         + re.escape(CONTRACT_MODULE) + r"['\"];?", re.M)
+        m = pat.search(content)
+        imported = set()
+        if m:
+            for n in m.group(1).split(","):
+                n = n.strip().replace("type ", "").strip()
+                if n:
+                    imported.add(n)
+        body = pat.sub("", content)
+        used = {s for s in CONTRACT_SYMBOLS
+                if re.search(r"\b" + re.escape(s) + r"\b", body)}
+        missing = sorted(used - imported)
+        if missing:
+            if m:
+                merged = sorted(imported | set(missing))
+                content = pat.sub(
+                    "import { " + ", ".join(merged) + " } from \"" + CONTRACT_MODULE + "\";",
+                    content, count=1)
+            else:
+                content = ("import { " + ", ".join(missing) + " } from \""
+                           + CONTRACT_MODULE + "\";\n" + content)
+            notes.append(f"imported missing contract symbol(s): {', '.join(missing)}")
+
+    return content, notes
+
+
 def exec_write_file(args):
     _normalize_path_key(args)
     path = os.path.expanduser(args["path"])
     content = args["content"]
     try:
+        content, notes = auto_repair(content, path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
-        return f"OK: wrote {len(content)} bytes to {path}"
+        msg = f"OK: wrote {len(content)} bytes to {path}"
+        if notes:
+            msg += "\nAUTO-REPAIRED before write: " + "; ".join(notes)
+        return msg
     except Exception as e:
         return f"ERROR: {e}"
 
@@ -729,6 +877,10 @@ def check_context_injection(task_file):
 
 def run(task_file, model, host, provider="ollama", ctx_size=None, fallback="none", fallback_model=None):
     task = Path(task_file).read_text()
+    if CONTRACT_SURFACE:
+        # Costs nothing: local inference is free, so a longer prompt is a pure
+        # win over supervisor-authored literal code. See extract_contract_surface().
+        task = task.rstrip() + "\n\n" + CONTRACT_SURFACE + "\n"
     status = StatusWriter(task_file)
 
     # Track original provider for fallback logic
@@ -1048,11 +1200,37 @@ def main():
     parser.add_argument("--fallback-model", default=None,
                         help="Model to use with fallback provider")
     parser.add_argument("--list-models", action="store_true", help="List available models and exit")
+    parser.add_argument("--contract", default=None, metavar="PATH",
+                        help="Shared contract/design-system file. Its real exports and object keys "
+                             "are appended to the task prompt, and referenced-but-unimported "
+                             "symbols are auto-repaired before write. Kills the single largest "
+                             "local-model failure class (invented API).")
+    parser.add_argument("--contract-module", default="@/lib/contract", metavar="SPEC",
+                        help="Import specifier for --contract (default: @/lib/contract)")
+    parser.add_argument("--print-contract-surface", default=None, metavar="PATH",
+                        help="Print the generated API surface for a contract file and exit")
     args = parser.parse_args()
 
     if args.list_models:
         list_models()
         sys.exit(0)
+
+    if args.print_contract_surface:
+        text, syms = extract_contract_surface(args.print_contract_surface, args.contract_module)
+        print(text)
+        print(f"\n# {len(syms)} exported symbols, {len(text)} bytes", file=sys.stderr)
+        sys.exit(0)
+
+    if args.contract:
+        if not os.path.isfile(args.contract):
+            print(f"ERROR: contract file not found: {args.contract}")
+            sys.exit(1)
+        CONTRACT_SURFACE, syms = extract_contract_surface(args.contract, args.contract_module)
+        globals()["CONTRACT_MODULE"] = args.contract_module
+        globals()["CONTRACT_SYMBOLS"] = syms
+        globals()["CONTRACT_SURFACE"] = CONTRACT_SURFACE
+        print(f"  Contract: {args.contract} ({len(syms)} symbols, "
+              f"{len(CONTRACT_SURFACE)} bytes appended to prompt)")
 
     if not args.task:
         parser.error("task file is required (use --list-models to see available models)")
