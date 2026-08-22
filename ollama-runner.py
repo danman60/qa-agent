@@ -257,7 +257,12 @@ def exec_read_file(args):
         return f"ERROR: {e}"
 
 
-STUB_MARKERS = ("not implemented", "todo:", "placeholder", "coming soon")
+# Phrases that only appear in unfinished code. Deliberately NOT bare "placeholder":
+# it matches the HTML `placeholder=` attribute on every form input, which flagged two
+# complete components (RecordPaymentForm, RosterFilterBar) as stubs on 2026-08-22.
+# A marker here must not be able to match ordinary working code.
+STUB_MARKERS = ("not implemented", "todo:", "fixme", "coming soon",
+                "placeholder implementation", "stub implementation")
 
 
 def extract_target_paths(task_text, worktree=None):
