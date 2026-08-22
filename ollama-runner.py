@@ -37,6 +37,13 @@ MODEL_REGISTRY_PATH = Path.home() / "projects" / "sysadmin" / "model-registry.js
 # OLLAMA_KEEP_ALIVE=... . See the comment in ollama_chat(): omitting this costs a
 # full model reload (~123 s for a 19.3 GB model) on EVERY turn when VRAM is tight.
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+# Long runs must not be killed by the harness. The bash tool default was 60s,
+# which silently failed ANY build or test suite the model tried to run — the
+# exact loop we want it closing (write -> tsc/test -> fix). 600s covers a
+# Next build; raise per-run with OLLAMA_BASH_TIMEOUT.
+BASH_TIMEOUT = int(os.environ.get("OLLAMA_BASH_TIMEOUT", "600"))
+# Per-request HTTP ceiling. Generation on a big local model can run minutes.
+OLLAMA_HTTP_TIMEOUT = int(os.environ.get("OLLAMA_HTTP_TIMEOUT", "900"))
 MAX_TURNS = 150
 
 # Populated by --contract. Drives both the injected API surface and the
@@ -522,11 +529,13 @@ def exec_bash(args):
                 if bin_dir.is_dir():
                     env["PATH"] = str(bin_dir) + ":" + env.get("PATH", "")
                     break  # Use newest node version
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60, env=env)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                                timeout=BASH_TIMEOUT, env=env)
         output = result.stdout + result.stderr
         return output[:5000] if output else "(no output)"
     except subprocess.TimeoutExpired:
-        return "ERROR: command timed out (60s)"
+        return (f"ERROR: command timed out ({BASH_TIMEOUT}s). If this was a build or test "
+                f"suite, it needs longer — rerun with OLLAMA_BASH_TIMEOUT=<seconds>.")
     except Exception as e:
         return f"ERROR: {e}"
 
@@ -589,7 +598,7 @@ def ollama_chat(host, model, messages, tools=None, ctx_size=32768):
     req = urllib.request.Request(url, data=data,
                                 headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=OLLAMA_HTTP_TIMEOUT) as resp:
             return json.loads(resp.read())
     except urllib.error.URLError as e:
         return {"error": str(e)}
@@ -612,7 +621,7 @@ def nim_chat(model, messages, tools=None):
         "Authorization": f"Bearer {NIM_KEY}",
     })
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=OLLAMA_HTTP_TIMEOUT) as resp:
             result = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500]
@@ -773,7 +782,7 @@ def deepseek_chat(model, messages, tools=None):
         "Authorization": f"Bearer {DEEPSEEK_KEY}",
     })
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=OLLAMA_HTTP_TIMEOUT) as resp:
             result = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500]
