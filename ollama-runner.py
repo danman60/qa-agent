@@ -471,7 +471,16 @@ def auto_repair(content, path):
         body = pat.sub("", content)
         used = {s for s in CONTRACT_SYMBOLS
                 if re.search(r"\b" + re.escape(s) + r"\b", body)}
-        missing = sorted(used - imported)
+        # A symbol the file DECLARES itself must never be imported on top of the
+        # declaration: `const FPS = 30` plus an injected `import { FPS }` is
+        # TS2440 "Import declaration conflicts with local declaration". Same
+        # shape as the duplicate-import bug above — the repair manufacturing the
+        # error it exists to prevent — just via a local binding instead of a
+        # second import.
+        declared = set(re.findall(
+            r"^\s*(?:export\s+)?(?:const|let|var|function|class|type|interface|enum)\s+"
+            r"([A-Za-z_$][\w$]*)", body, re.M))
+        missing = sorted(used - imported - declared)
         if missing:
             if m:
                 # Extend the existing VALUE import in place. Merging every known
