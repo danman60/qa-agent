@@ -177,7 +177,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a bash command. Returns stdout+stderr. Timeout 60s.",
+            "description": "Run a bash command. Returns stdout+stderr. Timeout 600s (builds and test suites are fine).",
             "parameters": {
                 "type": "object",
                 "properties": {
