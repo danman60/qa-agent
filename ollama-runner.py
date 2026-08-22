@@ -257,6 +257,72 @@ def exec_read_file(args):
         return f"ERROR: {e}"
 
 
+STUB_MARKERS = ("not implemented", "todo:", "placeholder", "coming soon")
+
+
+def extract_target_paths(task_text, worktree=None):
+    """Every file path a task file tells the model to write.
+
+    Matches the two shapes the task templates use — "Write ONE file: `<path>`"
+    and "Create the file `<path>` with EXACTLY this content" — plus any
+    backticked absolute-looking source path in the RULES footer.
+    """
+    paths = []
+    for m in re.finditer(r"`([^`\n]+\.(?:tsx|ts|jsx|js|py|sql))`", task_text):
+        p = m.group(1).strip()
+        if worktree:
+            p = p.replace("__WT__", worktree.rstrip("/"))
+        if "__WT__" in p:            # unresolved template — cannot check it
+            continue
+        if p not in paths:
+            paths.append(p)
+    return paths
+
+
+def preflight_targets(task_text, worktree=None, tsc_cmd=None):
+    """Refuse to dispatch work whose artefact already exists.
+
+    A task file in a queue directory is NOT evidence the work is missing, and
+    neither is the absence of a builder commit. Proven 2026-08-22 on classact:
+    7 specs with no builder commit, matching the driver's own
+    `DRAINED passed=9 failed=7` — and all 7 components already existed, real and
+    compiling, from an earlier bootstrap build. Dispatching would have
+    overwritten seven working components. Both signals agreed and both were
+    wrong; only the target file knew.
+
+    Returns (ok_to_dispatch, [notes]).
+    """
+    notes = []
+    targets = extract_target_paths(task_text, worktree)
+    if not targets:
+        return True, ["preflight: no target path found in task file — dispatching"]
+
+    existing = []
+    for p in targets:
+        if not os.path.isfile(p):
+            notes.append(f"preflight: MISSING {p} — real work")
+            continue
+        try:
+            body = open(p, errors="ignore").read()
+        except Exception:
+            continue
+        low = body.lower()
+        if not body.strip():
+            notes.append(f"preflight: {p} exists but is EMPTY — real work")
+            continue
+        if any(s in low for s in STUB_MARKERS):
+            notes.append(f"preflight: {p} exists but looks like a stub — real work")
+            continue
+        existing.append(p)
+        notes.append(f"preflight: {p} ALREADY EXISTS ({len(body)} bytes, no stub markers)")
+
+    if existing and len(existing) == len(targets):
+        notes.append("preflight: REFUSING to dispatch — every target already exists. "
+                     "Verify with the project's own tsc, then delete the task or pass --force.")
+        return False, notes
+    return True, notes
+
+
 def extract_contract_surface(contract_path, module="@/lib/contract"):
     """Build the API-surface block appended to every task prompt.
 
@@ -1209,6 +1275,11 @@ def main():
                         help="Import specifier for --contract (default: @/lib/contract)")
     parser.add_argument("--print-contract-surface", default=None, metavar="PATH",
                         help="Print the generated API surface for a contract file and exit")
+    parser.add_argument("--worktree", default=None, metavar="DIR",
+                        help="Substituted for __WT__ in task file paths (also used by preflight)")
+    parser.add_argument("--force", action="store_true",
+                        help="Dispatch even when every target file already exists. Off by default: "
+                             "a task file in a queue is NOT evidence the work is missing.")
     args = parser.parse_args()
 
     if args.list_models:
@@ -1238,6 +1309,15 @@ def main():
     if not os.path.isfile(args.task):
         print(f"ERROR: task file not found: {args.task}")
         sys.exit(1)
+
+    ok, notes = preflight_targets(Path(args.task).read_text(), args.worktree)
+    for n in notes:
+        print("  " + n)
+    if not ok and not args.force:
+        print("SKIPPED: nothing to build. (--force overrides)")
+        sys.exit(3)          # distinct from 1 so a driver can count skips separately
+    if not ok and args.force:
+        print("  preflight: --force given, dispatching over existing files anyway")
 
     if args.turns:
         MAX_TURNS = args.turns
