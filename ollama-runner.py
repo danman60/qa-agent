@@ -446,25 +446,44 @@ def auto_repair(content, path):
 
     # 2. Contract symbol referenced but never imported.
     if CONTRACT_MODULE and CONTRACT_SYMBOLS:
-        pat = re.compile(r"^import\s*\{([^}]*)\}\s*from\s*['\"]"
+        # `import type { X }` counts as importing X. The original pattern here was
+        # `^import\s*\{`, which does not match the `type` form -- so when a model
+        # wrote `import type { Claim } from '@bask/core'`, the repair could not see
+        # Claim, added a second `import { Claim, ... }`, and the file failed to
+        # compile with TS2300 Duplicate identifier. The repair caused the error it
+        # exists to prevent, and the task was blamed for it.
+        pat = re.compile(r"^import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['\"]"
                          + re.escape(CONTRACT_MODULE) + r"['\"];?", re.M)
-        m = pat.search(content)
+        # A file may import from the module more than once (a type import AND a
+        # value import). Count every one of them, not just the first.
         imported = set()
-        if m:
-            for n in m.group(1).split(","):
-                n = n.strip().replace("type ", "").strip()
+        value_import = None
+        for mm in pat.finditer(content):
+            for n in mm.group(1).split(","):
+                n = n.strip()
+                if n.startswith("type "):
+                    n = n[5:].strip()
                 if n:
                     imported.add(n)
+            if value_import is None and not re.match(r"^import\s+type\b", mm.group(0)):
+                value_import = mm
+        m = value_import
         body = pat.sub("", content)
         used = {s for s in CONTRACT_SYMBOLS
                 if re.search(r"\b" + re.escape(s) + r"\b", body)}
         missing = sorted(used - imported)
         if missing:
             if m:
-                merged = sorted(imported | set(missing))
-                content = pat.sub(
-                    "import { " + ", ".join(merged) + " } from \"" + CONTRACT_MODULE + "\";",
-                    content, count=1)
+                # Extend the existing VALUE import in place. Merging every known
+                # name into it instead would duplicate whatever a sibling
+                # `import type { ... }` line already brings in, and rewriting the
+                # first match blindly could clobber that type import outright.
+                value_names = sorted({n.strip() for n in m.group(1).split(",") if n.strip()}
+                                     | set(missing))
+                content = (content[:m.start()]
+                           + "import { " + ", ".join(value_names) + " } from \""
+                           + CONTRACT_MODULE + "\";"
+                           + content[m.end():])
             else:
                 content = ("import { " + ", ".join(missing) + " } from \""
                            + CONTRACT_MODULE + "\";\n" + content)
