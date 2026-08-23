@@ -85,9 +85,8 @@ OPENROUTER_MODEL = "anthropic/claude-opus-4.8"
 
 MODEL_MENU = [
     {"label": "qwen3-coder:30b", "host": "FIRMAMENT 4090", "desc": "fast, 193 tok/s", "provider": "ollama", "url": OLLAMA_URL},
-    {"label": "qwen3.5:27b", "host": "FIRMAMENT 4090", "desc": "precise, 41 tok/s", "provider": "ollama", "url": OLLAMA_URL},
-    {"label": "glm-4.7-flash", "host": "FIRMAMENT 4090", "desc": "marathon, 140 tok/s", "provider": "ollama", "url": OLLAMA_URL},
-    {"label": "gemma3:12b", "host": "SPYBALLOON 3060", "desc": "lightweight, 39.5 tok/s", "provider": "ollama-local", "url": OLLAMA_LOCAL_URL},
+    {"label": "gemma4:26b", "host": "FIRMAMENT 4090", "desc": "top pick, 65/65 @ 140.7 tok/s, 262k ctx", "provider": "ollama", "url": OLLAMA_URL},
+    {"label": "gemma4:12b", "host": "SPYBALLOON 3060", "desc": "lightweight, the 3060 standing model", "provider": "ollama-local", "url": OLLAMA_LOCAL_URL},
     {"label": "Kimi K2.5", "host": "NVIDIA NIM cloud", "desc": "free cloud, 40 req/min", "provider": "nim", "url": None},
     {"label": "claude-opus-4-8", "host": "Anthropic cloud", "desc": "smartest, accurate verify", "provider": "anthropic", "url": None},
 ]
@@ -1072,16 +1071,24 @@ def do_login(executor, state, credentials):
         except Exception:
             continue
 
-    # Click submit
-    for text in ["Sign In", "Log In", "Login", "Sign in", "Submit", "Log in"]:
-        try:
-            btn = page.get_by_role("button", name=text)
-            if btn.is_visible(timeout=1000):
-                btn.click()
-                state.log(f"  Clicked '{text}'", "result")
-                break
-        except Exception:
-            continue
+    # Click submit — exact match first (pages with multiple "Sign in as X (demo)" buttons
+    # make the substring locator strict-mode-fail silently), then substring .first fallback.
+    clicked = False
+    for exact in (True, False):
+        if clicked:
+            break
+        for text in ["Sign In", "Log In", "Login", "Sign in", "Submit", "Log in"]:
+            try:
+                btn = page.get_by_role("button", name=text, exact=exact)
+                if not exact:
+                    btn = btn.first
+                if btn.is_visible(timeout=1000):
+                    btn.click()
+                    state.log(f"  Clicked '{text}' (exact={exact})", "result")
+                    clicked = True
+                    break
+            except Exception:
+                continue
 
     # Wait for redirect OR page content change (some apps don't redirect)
     try:
