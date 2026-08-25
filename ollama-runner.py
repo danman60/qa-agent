@@ -1138,7 +1138,14 @@ IMPORTANT: Respond with ONE tool call JSON per message. After each tool call, yo
                     status.update(state="error", errors=tool_errors)
                     status.log("Circuit breaker: too many errors" +
                                (" (fallback also failed)" if has_switched else ""))
-                    return
+                    # EXIT NONZERO. A bare `return` here exited 0, so the broker
+                    # believed the run succeeded, ran the gate against a file
+                    # that was never written, and recorded "gate failed: 1" --
+                    # which reads as a bad spec. Six rows on 2026-08-24 were
+                    # really FIRMAMENT's ollama refusing connections (ten
+                    # `Errno 111` each, no write). Infrastructure failure must
+                    # not be indistinguishable from a model writing bad code.
+                    return 1
             time.sleep(3)
             continue
 
@@ -1400,8 +1407,12 @@ def main():
     print(f"  Task:  {args.task}")
     print(f"{'='*50}\n")
 
-    run(args.task, model, host, provider=provider, ctx_size=args.ctx,
-        fallback=args.fallback, fallback_model=getattr(args, 'fallback_model', None))
+    # Propagate run()'s verdict. It returns 1 when the circuit breaker fires;
+    # every other path returns None, which `or 0` keeps as success. Without
+    # this, an infrastructure failure exits 0 and the broker blames the spec.
+    rc = run(args.task, model, host, provider=provider, ctx_size=args.ctx,
+             fallback=args.fallback, fallback_model=getattr(args, 'fallback_model', None))
+    sys.exit(rc or 0)
 
 
 if __name__ == "__main__":
