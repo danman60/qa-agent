@@ -27,10 +27,10 @@ from pathlib import Path
 DEFAULT_MODEL = "qwen3-coder:30b"
 DEFAULT_HOST = "http://100.75.112.14:11434"  # FIRMAMENT
 NIM_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-NIM_KEY = os.environ.get("NIM_API_KEY", "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")
+NIM_KEY = os.environ.get("NIM_API_KEY", "")  # set in ~/.env.keys — never hardcode
 NIM_MODEL = "moonshotai/kimi-k2.5"
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
-DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-6c421e24b1e644749a81d2666fd7239b")
+DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY", "")  # set in ~/.env.keys — never hardcode
 DEEPSEEK_MODEL = "deepseek-chat"
 MODEL_REGISTRY_PATH = Path.home() / "projects" / "sysadmin" / "model-registry.json"
 # How long ollama pins the model in VRAM after a request. Override per-run with
