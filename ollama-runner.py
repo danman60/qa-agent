@@ -422,6 +422,34 @@ def auto_repair(content, path):
     cleanly is skipped so the gate still sees the model's real output.
     """
     notes = []
+
+    # 0. Stray LITERAL backslash-n past the end of the code. A runner emitted the
+    #    two characters `\` `n` after the final closing brace of four artifacts on
+    #    2026-08-29; `tsc` calls it an invalid character, so all four were gated
+    #    as FAILURES and quarantined. They were complete and CORRECT — stripping
+    #    one character recovered every one of them (domain-dns, duration, funnel,
+    #    and a full page). Silently binning good work is the expensive failure.
+    #
+    #    Deliberately runs BEFORE the extension gate below: the mistake is the
+    #    model's serialisation, not a TypeScript problem, so it can land in any
+    #    file. Conservative on purpose — only fires when what precedes the stray
+    #    escape actually looks like the end of code, so a file that legitimately
+    #    ends in a backslash escape is left alone.
+    stripped = content.rstrip()
+    trimmed = 0
+    while stripped.endswith("\\n"):
+        stripped = stripped[:-2].rstrip()
+        trimmed += 1
+    # Validate ONCE, after every trailing escape is off. Checking per-iteration
+    # looks at the tail of another escape ("...}\n" ends in the letter `n`) and
+    # bails, so a doubled `\n\n` — which is what actually shipped — survived.
+    if trimmed and (not stripped or stripped[-1] not in "})];>\"'`"):
+        stripped, trimmed = content.rstrip(), 0
+    if trimmed:
+        content = stripped + "\n"
+        notes.append(f"stripped {trimmed} stray literal `\\n` past end of file "
+                     f"(tsc reports these as an invalid character)")
+
     if not path.endswith((".tsx", ".ts", ".jsx")):
         return content, notes
 

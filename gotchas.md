@@ -4,3 +4,55 @@
 
 - no 'settings' or 'admin' link exists in | false pass on: Click it and verify settings page loads with confi | 2026-03-22
 - but the placeholder is not visi | false pass on: [ ] Type an email address (e.g., test@example.com) | 2026-03-28
+- but does not crash | false pass on: Event title "7Attitudes Presents; Spring Gala 2026 | 2026-03-28
+- however, no event cards exist - only a ' | false pass on: If events exist, Live Now or Free Events section v | 2026-03-28
+- but doesn't displ | false pass on: Curate tab | 2026-04-13
+- but shows 'no photos yet' message | false pass on: Click the heart icon | 2026-04-13
+- but does not navigate to (7 console erro | false pass on: Navigate to /memorial/a1111111-1111-1111-1111-1111 | 2026-04-13
+- but no visual confirmation of the copy a | false pass on: Open /contribute/<code> in an incognito context (n | 2026-04-13
+- but no expli | false pass on: Upload zone is present | 2026-04-13
+- but does not di | false pass on: Settings tab shows "Honoree Name" / "Birth Date" / | 2026-04-13
+- however, the | false pass on: Curate tab | 2026-04-13
+- but there are no photos available yet | false pass on: On the Photos tab for Margaret Thompson, hover a p | 2026-04-13
+- but does not display a dedicated comment | false pass on: Comments section heading reads "Share Your Thought | 2026-04-13
+- but no 'include map route' or 'incl | false pass on: Optional Scenes section shows checkboxes | 2026-04-13
+- but the current page o | false pass on: The new "Where was this?" place picker is present  | 2026-04-13
+- but no login form | false pass on: Navigate to `https://tester.compsync.net/login` | 2026-04-15
+- but the specific row for 'apex dance com | false pass on: Click on Apex Dance Company's invoice for "Test Co | 2026-04-15
+- but there is no visible link, button | false pass on: Navigate to /dashboard/scheduler/preferences. Scre | 2026-05-20
+- but no clear value proposition in headli | false pass on: Hero headline clearly communicates value propositi | 2026-05-29
+- but not studio name and cit | false pass on: Verify step 1 is visible (studio name + city field | 2026-05-29
+- but no 'already have an account? sign in | false pass on: `https://www.studiosage.ai/onboarding` | 2026-05-29
+- but no 'visit studiosage' or 'contact su | false pass on: `https://www.studiosage.ai/confirmation` | 2026-05-29
+- still on specialists list page instead o | false pass on: Open a specialist detail: Click the first speciali | 2026-05-29
+- but no new card for 'test metric' w | false pass on: Save the reading: Click the "Save reading" button. | 2026-05-29
+- but no redirect to dashboard yet | false pass on: Submit valid login: Click the "Sign in" button | 2026-05-29
+- still on specialists list page, not navi | false pass on: Open a specialist detail: Click the first speciali | 2026-05-29
+- but disclaimer is present | false pass on: Read the reply: Wait for the assistant reply bubbl | 2026-05-29
+- still on specialists list page, need to | false pass on: Open a specialist detail: Click the first speciali | 2026-05-29
+- didn't complete su (2 console error(s)) | false pass on: Save the reading: Click the "Save reading" button. | 2026-05-29
+- but no actual invoice data is v | false pass on: Invoices show amounts, statuses (paid/unpaid), and | 2026-05-29
+- but main content area is | false pass on: Click Studios in sidebar | 2026-05-29
+- but the page content remains the sam | false pass on: Try clicking on a studio row to see details | 2026-05-29
+- but the page snapshot still shows the in | false pass on: [06-metrics] Save the reading: Click the "Save rea | 2026-05-29
+- but no routines list is visible in the s | false pass on: Click Routines in sidebar | 2026-05-29
+- but no invoice list is visible in the sn | false pass on: Click Invoices in sidebar | 2026-05-29
+- but page content remains the same | false pass on: Try clicking on a studio row to see details | 2026-05-29
+- but page content remains unchanged, stil | false pass on: Try clicking an invoice to see detail view | 2026-05-29
+- but shows no studio data table or list | false pass on: Click Studios in sidebar | 2026-05-29
+- but shows no routine data | false pass on: Click Routines in sidebar | 2026-05-29
+- but shows no invoice data | false pass on: Click Invoices in sidebar | 2026-05-29
+- but does not sho | false pass on: Add a new KB entry via Quick Add: | 2026-07-16
+- still on knowledge base page | false pass on: In the test chat, type | 2026-07-16
+- but no new form appeared in the snaps | false pass on: Add a new KB entry via Quick Add: | 2026-07-16
+- but the task requires v | false pass on: Navigate directly to `http://localhost:3211/discov | 2026-07-23
+- still on the /tv-demo page after escape | false pass on: Press Enter on the initial ready work. Verify the  | 2026-07-23
+- kindness-board (Next 16, Supabase auth): built-in login helper filled email+password then declared FAIL because the URL was still /login after its wait; the same creds signed in first try under direct Playwright. Rule: on 'Login failed', re-check for a Supabase `sb-*-auth-token` cookie and extend the post-submit wait past 30s before skipping auth items. | 2026-08-12
+- Login pages with one-click demo buttons ("Sign in as X (demo)") break substring button matching: get_by_role(name="Sign In") strict-mode-fails on multi-match and the exception is swallowed, so submit is never clicked and login silently fails | Always try exact=True button match before substring, and use .first on the substring fallback | 2026-08-18
+- but no version 2 is visible to revert to | false pass on: Open Config → Versions. Revert exactly version 1.  | 2026-08-21
+- but no outcome or proof cards are visibl | false pass on: Outcome or proof cards render for opportunities th | 2026-08-24
+- but doesn't ind | false pass on: When comparisons are suppressed, the view says so  | 2026-08-24
+- but does not appear to be inside the com | false pass on: `/book` loads inside the Compass shell (sidenav vi | 2026-08-24
+- but there's no 'data sharing' entry in t | false pass on: A **Data sharing** entry appears in the Compass na | 2026-08-24
+- but does not con | false pass on: The consent tiers are explained in plain language. | 2026-08-24
+- but no 3d force graph with dark canvas a | false pass on: The canvas is dark but the surrounding page chrome | 2026-08-24
