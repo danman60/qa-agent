@@ -18,6 +18,7 @@ import re
 import time
 import hashlib
 import subprocess
+import threading
 import argparse
 import urllib.request
 import urllib.error
@@ -52,6 +53,15 @@ CONTRACT_MODULE = None      # e.g. "@/lib/contract"
 CONTRACT_SYMBOLS = set()    # every real exported name
 CONTRACT_SURFACE = None     # the generated block appended to the task prompt
 MAX_TOOL_ERRORS = 10
+# The task's acceptance gate (the SAME command the broker judges by), passed as
+# --gate. When set, `done` is refused until it exits 0. None = the old keyword
+# scan, so a runner started without --gate behaves exactly as before.
+GATE_CMD = None
+GATE_TIMEOUT = int(os.environ.get("OLLAMA_GATE_TIMEOUT", "900"))
+# While the runner is blocked on a model call or the gate it touches its status
+# file this often, so the broker's idle breaker (newest mtime of log/status,
+# 420 s) measures a stuck RUNNER, not a model call queued inside ollama.
+HEARTBEAT_SECONDS = int(os.environ.get("OLLAMA_RUNNER_HEARTBEAT", "60"))
 
 
 def load_model_registry():
@@ -246,7 +256,10 @@ def _normalize_path_key(args):
             if alt in args:
                 args["path"] = args[alt]
                 return
-        raise KeyError(f"No path key found in args: {list(args.keys())}")
+        # KeyError("path") is caught at the tool-dispatch site and returned to
+        # the model as `ERROR: missing 'path'`. It used to escape and crash the
+        # whole runner (14 blocked rows, 45 logs, audit 2026-09-30).
+        raise KeyError("path")
 
 def exec_read_file(args):
     _normalize_path_key(args)
@@ -997,6 +1010,55 @@ class StatusWriter:
 # Context Injection (Opus can write to this file mid-run)
 # ═══════════════════════════════════════════════════════════════════
 
+class Heartbeat:
+    """Touch `path` every HEARTBEAT_SECONDS while a blocking call is in flight.
+
+    The broker's idle breaker reads the newest mtime of this task's log and
+    status files. A non-streaming /api/chat that waits behind another client's
+    load writes nothing for its whole duration, so 38 rows were killed before
+    the model ever answered and 18 mid-call (audit 2026-09-30). The heartbeat
+    only proves THIS process is alive and waiting; a truly hung call is still
+    bounded by OLLAMA_HTTP_TIMEOUT per call and the broker's hard timeout.
+    Content is never touched — only the mtime.
+    """
+
+    def __init__(self, path, every=None):
+        self.path = path
+        self.every = every or HEARTBEAT_SECONDS
+        self._stop = threading.Event()
+        self._t = None
+
+    def _beat(self):
+        while not self._stop.wait(self.every):
+            try:
+                os.utime(self.path, None)
+            except OSError:
+                pass
+
+    def __enter__(self):
+        self._t = threading.Thread(target=self._beat, daemon=True)
+        self._t.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        if self._t:
+            self._t.join(timeout=2)
+        return False
+
+
+def run_acceptance_gate(status):
+    """Run GATE_CMD in the task's cwd. Returns (passed, exit_code, output_tail)."""
+    try:
+        with Heartbeat(status.status_file):
+            p = subprocess.run(GATE_CMD, shell=True, capture_output=True, text=True,
+                               cwd=os.getcwd(), timeout=GATE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False, None, f"gate timed out after {GATE_TIMEOUT}s"
+    out = ((p.stdout or "") + (p.stderr or "")).strip()
+    return p.returncode == 0, p.returncode, out[-2500:]
+
+
 def check_context_injection(task_file):
     """Check if Opus has injected additional context."""
     inject_file = Path(str(task_file).replace(".md", "-inject.md"))
@@ -1133,7 +1195,8 @@ IMPORTANT: Respond with ONE tool call JSON per message. After each tool call, yo
 
         # Call LLM (ollama or NIM)
         _ctx = ctx_size or 32768
-        resp = llm_chat(provider, model, host, messages, tools=TOOLS, ctx_size=_ctx)
+        with Heartbeat(status.status_file):
+            resp = llm_chat(provider, model, host, messages, tools=TOOLS, ctx_size=_ctx)
 
         if "error" in resp:
             status.log(f"OLLAMA ERROR: {resp['error']}")
@@ -1220,6 +1283,34 @@ IMPORTANT: Respond with ONE tool call JSON per message. After each tool call, yo
                 summary = args.get("summary", "Task complete")
                 files = args.get("files_changed", [])
 
+                # THE GATE DECIDES `done`, WHEN THERE IS ONE. The keyword scan
+                # below matches upper-case ERROR/FAILED; tsc prints `error TS…`,
+                # so 67 of 84 gate-failed rows reached DONE with a red compile
+                # (audit 2026-09-30). With --gate the exit code is the check and
+                # the keyword scan is skipped; without it, behaviour is unchanged.
+                gate_passed = False
+                if GATE_CMD:
+                    ok, gate_exit, gate_out = run_acceptance_gate(status)
+                    if ok:
+                        gate_passed = True
+                        status.log(f"GATE OK before done: {gate_out[-200:]}")
+                    elif turn < MAX_TURNS - 5:
+                        status.log(f"REJECTED done — acceptance gate failed (exit {gate_exit})")
+                        messages.append({
+                            "role": "tool",
+                            "content": ("[runner-check] You called 'done' but the acceptance gate "
+                                        f"FAILED (exit {gate_exit}). Gate: {GATE_CMD}\n"
+                                        f"Output:\n{gate_out}\n\nFix the errors that name "
+                                        "your target file, then run the gate yourself and call "
+                                        "done only when it passes."),
+                            "tool_call_id": call_id,
+                        })
+                        status._no_tool_turns = 0
+                        continue
+                    else:
+                        status.log(f"GATE FAILED at turn {turn} (exit {gate_exit}) — "
+                                   f"out of turns, finishing; the broker's gate is the verdict")
+
                 # Validate: reject premature done calls
                 writes_made = sum(1 for m in messages if m.get("role") == "tool" and
                                  any(kw in str(m.get("content", "")) for kw in ["wrote", "Written", "edited", "Created"]))
@@ -1228,7 +1319,7 @@ IMPORTANT: Respond with ONE tool call JSON per message. After each tool call, yo
                 recent_errors = sum(1 for m in messages[-10:] if m.get("role") == "tool" and
                                    any(kw in str(m.get("content", "")) for kw in ["ERROR", "Traceback", "ModuleNotFound", "ImportError", "FAILED"]))
 
-                if recent_errors > 0 and turn < MAX_TURNS - 5:
+                if recent_errors > 0 and not gate_passed and turn < MAX_TURNS - 5:
                     status.log(f"REJECTED done — {recent_errors} recent errors in tool output. Fix them first.")
                     messages.append({
                         "role": "tool",
@@ -1270,7 +1361,19 @@ IMPORTANT: Respond with ONE tool call JSON per message. After each tool call, yo
             handler = TOOL_HANDLERS.get(name)
             if handler:
                 status.log(f"TOOL: {name}({json.dumps(args)[:120]})")
-                result = handler(args)
+                # A malformed call (gemma sends `{"content": …}` with no path)
+                # is the MODEL's error: tell it, never crash the runner.
+                try:
+                    if not isinstance(args, dict):
+                        raise TypeError(f"arguments must be an object, got {type(args).__name__}")
+                    result = handler(args)
+                except KeyError as e:
+                    got = list(args.keys()) if isinstance(args, dict) else []
+                    result = (f"ERROR: missing '{e.args[0] if e.args else '?'}' argument for "
+                              f"{name} (got keys: {got}). Call {name} again with every "
+                              f"required argument.")
+                except TypeError as e:
+                    result = f"ERROR: malformed {name} call: {e}"
                 status.log(f"  → {result[:150]}")
 
                 # Track file changes
@@ -1354,6 +1457,10 @@ def main():
                         help="Print the generated API surface for a contract file and exit")
     parser.add_argument("--worktree", default=None, metavar="DIR",
                         help="Substituted for __WT__ in task file paths (also used by preflight)")
+    parser.add_argument("--gate", default=None, metavar="CMD",
+                        help="Acceptance gate shell command (run in cwd). `done` is refused "
+                             "until it exits 0; its output is fed back to the model. "
+                             "Omitted = legacy keyword scan.")
     parser.add_argument("--force", action="store_true",
                         help="Dispatch even when every target file already exists. Off by default: "
                              "a task file in a queue is NOT evidence the work is missing.")
@@ -1398,6 +1505,8 @@ def main():
 
     if args.turns:
         MAX_TURNS = args.turns
+    if args.gate:
+        globals()["GATE_CMD"] = args.gate
 
     # Resolve model from registry (auto-detects provider and host)
     if args.model:
