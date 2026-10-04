@@ -10,6 +10,7 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from uuid import uuid4
 
 from .base import BaseExecutor
 
@@ -143,15 +144,7 @@ class AVDExecutor(BaseExecutor):
 
     def snapshot(self) -> str:
         """Dump uiautomator XML and return parsed text representation."""
-        _adb(["shell", "uiautomator", "dump", "/sdcard/ui.xml"], serial=self.serial)
-        stdout, _, rc = _adb(["shell", "cat", "/sdcard/ui.xml"], serial=self.serial)
-        if rc != 0 or not stdout:
-            return "(snapshot error: uiautomator dump failed)"
-
-        try:
-            return self._xml_to_text(stdout)
-        except Exception as e:
-            return f"(snapshot parse error: {e})"
+        return self._xml_to_text(self._get_ui_xml())
 
     def screenshot(self, path: str) -> str:
         """Take screenshot via adb screencap, pull, and resize."""
@@ -519,10 +512,26 @@ class AVDExecutor(BaseExecutor):
         return self._current_activity or f"{self.package}/(unknown)"
 
     def _get_ui_xml(self) -> str:
-        """Dump and return raw uiautomator XML."""
-        _adb(["shell", "uiautomator", "dump", "/sdcard/ui.xml"], serial=self.serial)
-        stdout, _, _ = _adb(["shell", "cat", "/sdcard/ui.xml"], serial=self.serial)
-        return stdout
+        """Read one fresh hierarchy or fail before any selector can act on it."""
+        remote = f"/sdcard/qa-ui-{uuid4().hex}.xml"
+        try:
+            stdout, stderr, rc = _adb(
+                ["shell", "uiautomator", "dump", remote], serial=self.serial)
+            if rc != 0 or remote not in stdout or "ERROR" in stdout.upper() or "ERROR" in stderr.upper():
+                detail = (stderr or stdout or f"exit {rc}")[:300]
+                raise RuntimeError(f"Fresh Android UI dump failed: {detail}")
+            xml, stderr, rc = _adb(["shell", "cat", remote], serial=self.serial)
+            if rc != 0 or not xml:
+                raise RuntimeError(f"Fresh Android UI read failed: {(stderr or f'exit {rc}')[:300]}")
+            try:
+                root = ET.fromstring(xml)
+            except ET.ParseError as error:
+                raise RuntimeError("Fresh Android UI dump is not valid XML") from error
+            if root.tag != "hierarchy":
+                raise RuntimeError("Fresh Android UI dump has no hierarchy root")
+            return xml
+        finally:
+            _adb(["shell", "rm", "-f", remote], serial=self.serial)
 
     def _find_element_bounds(self, role: str = "", name: str = "",
                               text: str = "") -> str | None:
