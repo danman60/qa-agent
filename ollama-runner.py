@@ -835,6 +835,57 @@ def openai_chat(host, model, messages, tools=None):
     }
 
 
+def openai_tools_chat(host, model, messages, tools=None, output_limit=None):
+    """OpenAI-compatible server WITH native tool calls (PolyStrata via the broker's ssh tunnel).
+
+    Unlike openai_chat (provider llama-server: tools described in the prompt, 4096-token cap), this sends
+    `tools` in the payload and reads message.tool_calls. reasoning_effort "none" keeps the model from
+    spending the output budget on thinking (what the 2026-10-16 benchmark ran with).
+    """
+    payload = {
+        "model": model or "local",
+        "messages": messages,
+        "max_tokens": int(output_limit or os.environ.get("OPENAI_MAX_TOKENS") or 16384),
+        "reasoning_effort": "none",
+        "stream": False,
+    }
+    if tools:
+        payload["tools"] = tools
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(f"{host}/v1/chat/completions", data=data,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=OLLAMA_HTTP_TIMEOUT) as resp:
+            result = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return {"error": f"HTTP {e.code}: {e.read(500).decode('utf-8', 'replace')}", "http_status": e.code}
+    except Exception as e:
+        return {"error": str(e)}
+    if "error" in result:
+        return result
+    msg = (result.get("choices") or [{}])[0].get("message", {})
+    normalized_calls = []
+    for tc in msg.get("tool_calls", []) or []:
+        fn = tc.get("function", {})
+        args = fn.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+        normalized_calls.append({"id": tc.get("id", ""),
+                                 "function": {"name": fn.get("name", ""), "arguments": args}})
+    content = msg.get("content", "") or ""
+    if not normalized_calls and content:
+        normalized_calls = parse_tool_calls_from_text(content)   # model wrote the call as text
+    usage = result.get("usage") or {}
+    out = {"message": {"role": "assistant", "content": content, "tool_calls": normalized_calls},
+           "_raw_message": msg}
+    if usage.get("prompt_tokens"):
+        out["prompt_eval_count"] = usage["prompt_tokens"]
+    return out
+
+
 def deepseek_chat(model, messages, tools=None):
     """Call DeepSeek API (OpenAI-compatible)."""
     payload = {
@@ -898,6 +949,8 @@ def llm_chat(provider, model, host, messages, tools=None, ctx_size=32768):
         return deepseek_chat(model, messages, tools)
     elif provider == "llama-server":
         return openai_chat(host, model, messages, tools)
+    elif provider == "openai":
+        return openai_tools_chat(host, model, messages, tools, output_limit=output_limit)
     else:
         return ollama_chat(host, model, messages, tools, ctx_size=ctx_size)
 
@@ -1436,7 +1489,7 @@ def main():
     parser = argparse.ArgumentParser(description="Local LLM Task Runner")
     parser.add_argument("task", nargs="?", help="Path to task .md file")
     parser.add_argument("--model", default=None, help="Model name or alias (e.g. minimax, qwen, deepseek)")
-    parser.add_argument("--provider", choices=["ollama", "nim", "deepseek", "llama-server"], default=None,
+    parser.add_argument("--provider", choices=["ollama", "nim", "deepseek", "llama-server", "openai"], default=None,
                         help="Provider (auto-detected from model registry if --model is set)")
     parser.add_argument("--host", default=None)
     parser.add_argument("--ctx", type=int, default=None, help="Context window size (default: 32768 for 4090, 16384 for smaller GPUs)")
