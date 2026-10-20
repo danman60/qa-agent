@@ -40,7 +40,7 @@ Every write below must show up on screen after the form submits; a form that cle
 ## 4. Producer
 - [ ] Click "Sign in as producer (demo)" → `/p/gencon` loads with four stat tiles (Quests ≥ 1).
 - [ ] Save an announcement titled `QA notice`, Publish now ticked → appears in the Announcements list.
-- [ ] Save a sponsor `QA Brewing`, website `https://example.com`, blurb under 140 chars → appears under Sponsors.
+- [ ] Save a sponsor `QA Brewing`, website field set to example dot com with the https scheme (type it, do not open it), blurb under 140 chars → appears under Sponsors.
 - [ ] Blurb counter: typing shows `n / 140`.
 - [ ] `/q/gencon-road-trip` as producer → redirect to `/q` (producer is not a quest member) — no crash.
 
