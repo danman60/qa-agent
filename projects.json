@@ -95,7 +95,7 @@
     "email": "sage-test@streamstage.live",
     "password": "SageTest2026!",
     "login_url": "https://www.studiosage.ai/login",
-    "notes": "DEMO ENV ONLY. Demo account = studio_0011 'Dans Dancers' (sage-test@streamstage.live / SageTest2026!), share code gLHL4H, 9 parents, 21 KB. Dev login also via https://www.studiosage.ai/login?autodev=1. NEVER touch real tenants (Caledonia studio_0009, Grand River studio_0010, Studio Dhoom, The School, Jacqueline's). DB = supabase-CCandSS (netbsyvxrhrqxyzqflmd, SHARED across sibling apps). Prod = main HEAD on Vercel project studiosagesite; push to main auto-deploys."
+    "notes": "DEMO ENV ONLY. Demo account = studio_0011 'Dans Dancers' (sage-test@streamstage.live / SageTest2026!), share code gLHL4H, 9 parents, 21 KB. Log in via the password form on /login ('Use password instead'); the ?autodev=1 bypass was removed 2026-10-20. NEVER touch real tenants (Caledonia studio_0009, Grand River studio_0010, Studio Dhoom, The School, Jacqueline's). DB = supabase-CCandSS (netbsyvxrhrqxyzqflmd, SHARED across sibling apps). Prod = main HEAD on Vercel project studiosagesite; push to main auto-deploys."
   },
   {
     "id": "lillearner",
@@ -307,5 +307,17 @@
     "email": "demo-host@groupquest.test",
     "password": "<DEMO_PASSWORD from group-trip/.env.local>",
     "login_url": "http://localhost:3041/login"
+  },
+  {
+    "id": "groupquest-local",
+    "name": "GroupQuest (prod)",
+    "platform": "web",
+    "url": "https://group-trip-wine.vercel.app",
+    "repo": "/home/danman60/projects/group-trip",
+    "checklist": "checklists/groupquest.md",
+    "test_dir": "/home/danman60/projects/group-trip/tests/agent",
+    "email": "demo-host@groupquest.test",
+    "password": "<DEMO_PASSWORD from group-trip/.env.local>",
+    "login_url": "https://group-trip-wine.vercel.app/login"
   }
 ]

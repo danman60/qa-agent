@@ -50,3 +50,15 @@ Every write below must show up on screen after the form submits; a form that cle
 - [ ] Double-click "Log expense" fast → only ONE row appears.
 - [ ] Refresh the ledger after submitting → the row persists.
 - [ ] Phone width 390: board, ledger, places, party — nothing scrolls sideways, bottom tab bar visible.
+
+## 6. Added 2026-10-20 (portraits, limits, activation)
+- [ ] Host: `/q/gencon-road-trip/party` shows a selfie upload and a "Request portrait" control on the host's own sheet; before any upload the sheet shows initials and an instruction, not a broken image.
+- [ ] Upload a non-image file (e.g. a .txt renamed .jpg) → inline error, no crash. Upload a real small JPG → it is accepted and shown.
+- [ ] Member: cannot change the host's portrait (no control on another member's sheet).
+- [ ] Signed out: opening a portrait image URL from the party page → redirect or 401/403, never the image.
+- [ ] Rate limit: post 12 campfire messages fast → after the limit an inline "slow down" style error appears and no further rows; the earlier messages remain.
+- [ ] Rate limit: create invites repeatedly → same behaviour; existing invites intact.
+- [ ] Activation: host starts a new quest → the board shows what to do next (invite, first card) with a working link to Invite.
+- [ ] Activation: member opens a `/join/<code>` link → lands on that quest's board with an empty state that says what to do.
+- [ ] `/` and `/login`: no filler copy ("Lorem", "Your tagline here"); any unknown facts appear as `[GroupQuest to supply]`, not invented numbers or dates.
+- [ ] Console clean on party, campfire, invite and the landing page.
