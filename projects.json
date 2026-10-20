@@ -239,5 +239,73 @@
     "checklist": "/home/danman60/projects/uvalux-platform/tests/agent/walkthrough-full.md",
     "test_dir": "/home/danman60/projects/uvalux-platform/tests/agent",
     "notes": "No auth until M3. Bask operator surfaces need no role param; EVERY /compass route requires ?role=uvalux_rep or it returns FORBIDDEN. Presenter panel is cmd-shift-D."
+  },
+  {
+    "id": "floortime",
+    "name": "FloorTime",
+    "url": "https://floortime-tau.vercel.app",
+    "login_url": "https://floortime-tau.vercel.app/login",
+    "checklist": "/home/danman60/projects/floortime/tests/agent/flow-01-auth.md",
+    "test_dir": "/home/danman60/projects/floortime/tests/agent",
+    "notes": "Demo login BUTTONS on /login ('Sign in as admin|teacher|family') \u2014 no email/password needed. DB oracles: ssh netcup + psql -d floortime (no Supabase MCP). Tests run against the DEMO tenant; it cannot send email."
+  },
+  {
+    "name": "dance-cover",
+    "url": "http://localhost:3021",
+    "checklist": "/home/danman60/projects/dance-cover/tests/agent/marketplace.md",
+    "email": "demo-studio@dancecover.test",
+    "password": "No70ydCRPjKlEYaGvo3I",
+    "login_url": "http://localhost:3021/login",
+    "test_dir": "/home/danman60/projects/dance-cover/tests/agent"
+  },
+  {
+    "id": "studioshift-prod",
+    "name": "StudioShift (Prod)",
+    "platform": "web",
+    "url": "https://dance-cover.vercel.app",
+    "repo": "/home/danman60/projects/dance-cover",
+    "checklist": "/home/danman60/projects/dance-cover/tests/agent/marketplace.md",
+    "test_dir": "/home/danman60/projects/dance-cover/tests/agent",
+    "email": "demo-studio@dancecover.test",
+    "password": "No70ydCRPjKlEYaGvo3I",
+    "login_url": "https://dance-cover.vercel.app/login",
+    "notes": "PRODUCTION, owner-authorised 2026-09-04 for the overnight E2E run. Writes real rows to the netcup tenant `dancecover` (https://sb-dancecover.djatb.fyi). SAFE BECAUSE: the app is unlaunched \u2014 every profile is is_demo and no real money has moved (verified: 11 profiles all is_demo, 3 bookings all unpaid). RULES: use ONLY the @dancecover.test demo accounts; delete any throwaway account you create (an orphaned qa-link-test@dancecover.test had to be cleaned up manually on 2026-09-05); Stripe stays TEST mode and the live key in ~/.env.keys is refused by src/lib/payments.ts; if you configure the platform fee, restore it to NULL afterwards. Do NOT re-seed \u2014 the seed is idempotent but re-seeding is not part of a read/write UI test. The repo URL keeps the dance-cover name; the PRODUCT is StudioShift."
+  },
+  {
+    "id": "household",
+    "name": "HOUSEHOLD (tailnet)",
+    "platform": "web",
+    "url": "http://100.122.177.91:3031",
+    "repo": "/home/danman60/projects/household",
+    "checklist": "/home/danman60/projects/household/tests/agent/checklist.md",
+    "test_dir": "/home/danman60/projects/household/tests/agent",
+    "email": "demo-household@household.test",
+    "password": "<DEMO_PASSWORD env in household/.env.local>",
+    "login_url": "http://100.122.177.91:3031/login"
+  },
+  {
+    "id": "studioshift-prod-shift",
+    "name": "StudioShift (Prod shift.studiobeat.io)",
+    "platform": "web",
+    "url": "https://shift.studiobeat.io",
+    "repo": "/home/danman60/projects/dance-cover",
+    "checklist": "/home/danman60/projects/dance-cover/tests/agent/prod-visitor.md",
+    "test_dir": "/home/danman60/projects/dance-cover/tests/agent",
+    "email": "danieljohnabrahamson+qa20260917s@gmail.com",
+    "password": "QA-20260917-shift-pw",
+    "login_url": "https://shift.studiobeat.io/login",
+    "notes": "LIVE PRODUCTION at the real domain (the vercel.app alias is the same deployment). Owner authorised a full role-suite E2E on 2026-09-17. THIS TENANT NOW HOLDS 25 REAL USER PROFILES - the older entry's note claiming every profile is is_demo is STALE. Rules: create only QA-20260917-marked records, never touch a record you did not create, never complete a payment, no schema changes. Stripe prod key is sk_test_ (test mode). Per-role checklists: prod-visitor.md, prod-studio.md, prod-teacher.md, prod-ops.md - run each separately, qa_agent takes one credential pair."
+  },
+  {
+    "id": "groupquest-local",
+    "name": "GroupQuest (local)",
+    "platform": "web",
+    "url": "http://localhost:3041",
+    "repo": "/home/danman60/projects/group-trip",
+    "checklist": "checklists/groupquest.md",
+    "test_dir": "/home/danman60/projects/group-trip/tests/agent",
+    "email": "demo-host@groupquest.test",
+    "password": "<DEMO_PASSWORD from group-trip/.env.local>",
+    "login_url": "http://localhost:3041/login"
   }
 ]
