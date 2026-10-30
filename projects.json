@@ -9,7 +9,8 @@
     "test_dir": "/home/danman60/projects/CompPortal/tests/agent",
     "email": "testcd@compsync.net",
     "password": "1CompSyncLogin!",
-    "login_url": "https://demo.compsync.net/login"
+    "login_url": "https://demo.compsync.net/login",
+    "allow_writes": true
   },
   {
     "id": "compportal-sd",
@@ -21,7 +22,8 @@
     "test_dir": "/home/danman60/projects/CompPortal/tests/agent",
     "email": "testsd@compsync.net",
     "password": "123456",
-    "login_url": "https://demo.compsync.net/login"
+    "login_url": "https://demo.compsync.net/login",
+    "allow_writes": true
   },
   {
     "id": "compportal-sd-app",
@@ -34,7 +36,8 @@
     "email": "danieljohnabrahamson+xtremesd@gmail.com",
     "password": "123456",
     "login_url": "https://app.compsync.net/login",
-    "_note": "Real-tenant SDs live on app.compsync.net (sd_app_portal default-ON). demo.compsync.net SD config remains valid ONLY for the demo tenant (demo_role_picker exemption)."
+    "_note": "Real-tenant SDs live on app.compsync.net (sd_app_portal default-ON). demo.compsync.net SD config remains valid ONLY for the demo tenant (demo_role_picker exemption).",
+    "allow_writes": true
   },
   {
     "id": "compportal-prod",
@@ -58,7 +61,8 @@
     "test_dir": "/home/danman60/projects/amplify/tests/agent",
     "email": "test-amplify@test.local",
     "password": "TestAmplify2026!",
-    "login_url": ""
+    "login_url": "",
+    "allow_writes": true
   },
   {
     "id": "foundervision",
@@ -82,7 +86,8 @@
     "test_dir": "",
     "email": "",
     "password": "",
-    "login_url": ""
+    "login_url": "",
+    "allow_writes": true
   },
   {
     "id": "studiosage",
@@ -95,7 +100,8 @@
     "email": "sage-test@streamstage.live",
     "password": "SageTest2026!",
     "login_url": "https://www.studiosage.ai/login",
-    "notes": "DEMO ENV ONLY. Demo account = studio_0011 'Dans Dancers' (sage-test@streamstage.live / SageTest2026!), share code gLHL4H, 9 parents, 21 KB. Log in via the password form on /login ('Use password instead'); the ?autodev=1 bypass was removed 2026-10-20. NEVER touch real tenants (Caledonia studio_0009, Grand River studio_0010, Studio Dhoom, The School, Jacqueline's). DB = supabase-CCandSS (netbsyvxrhrqxyzqflmd, SHARED across sibling apps). Prod = main HEAD on Vercel project studiosagesite; push to main auto-deploys."
+    "notes": "DEMO ENV ONLY. Demo account = studio_0011 'Dans Dancers' (sage-test@streamstage.live / SageTest2026!), share code gLHL4H, 9 parents, 21 KB. Log in via the password form on /login ('Use password instead'); the ?autodev=1 bypass was removed 2026-10-20. NEVER touch real tenants (Caledonia studio_0009, Grand River studio_0010, Studio Dhoom, The School, Jacqueline's). DB = supabase-CCandSS (netbsyvxrhrqxyzqflmd, SHARED across sibling apps). Prod = main HEAD on Vercel project studiosagesite; push to main auto-deploys.",
+    "allow_writes": true
   },
   {
     "id": "lillearner",
@@ -120,7 +126,8 @@
     "test_dir": "/home/danman60/projects/LilLearner/tests/agent",
     "email": "kaylajames2788@gmail.com",
     "password": "dance2788",
-    "login_url": "https://lil-learner.vercel.app/sign-in"
+    "login_url": "https://lil-learner.vercel.app/sign-in",
+    "allow_writes": true
   },
   {
     "id": "memorialwise",
@@ -132,7 +139,8 @@
     "test_dir": "/home/danman60/projects/memorialwise/tests/agent",
     "email": "test@memorialwise.dev",
     "password": "TestMemorial123!",
-    "login_url": "https://memorialwise.vercel.app/login"
+    "login_url": "https://memorialwise.vercel.app/login",
+    "allow_writes": true
   },
   {
     "id": "holodeck",
@@ -142,7 +150,7 @@
     "repo": "/home/danman60/projects/Holodeck",
     "checklist": "checklists/holodeck.md",
     "test_dir": "/home/danman60/projects/Holodeck/tests/agent",
-    "notes": "No auth. Splat canvas needs real WebGL: run headed under xvfb + --use-angle=vulkan + VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json (local RTX 3060). Bridge: HOLODECK_SKIP_VOICE=1 HOLODECK_WORLDS_DIR=/mnt/firmament/Holodeck/worlds .venv/bin/python -m uvicorn bridge.server:app --port 3556. FlashWorld GPU service stays OFFLINE (shared 4090) \u2014 fresh gen is deferred; cache-miss -> service_offline error card is the expected error test."
+    "notes": "No auth. Splat canvas needs real WebGL: run headed under xvfb + --use-angle=vulkan + VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json (local RTX 3060). Bridge: HOLODECK_SKIP_VOICE=1 HOLODECK_WORLDS_DIR=/mnt/firmament/Holodeck/worlds .venv/bin/python -m uvicorn bridge.server:app --port 3556. FlashWorld GPU service stays OFFLINE (shared 4090) — fresh gen is deferred; cache-miss -> service_offline error card is the expected error test."
   },
   {
     "id": "mychart",
@@ -179,7 +187,8 @@
     "test_dir": "/home/danman60/projects/carly-hair-co/tests/agent",
     "email": "test@carly-hair-co.com",
     "password": "TestPassword123!",
-    "login_url": "https://carly-hair-co.vercel.app/login"
+    "login_url": "https://carly-hair-co.vercel.app/login",
+    "allow_writes": true
   },
   {
     "id": "tvbox-admin",
@@ -191,7 +200,8 @@
     "test_dir": "/home/danman60/projects/TVBOX/tests/agent",
     "email": "marceljan@yahoo.com",
     "password": "tv123",
-    "login_url": "https://dantv-portal.vercel.app/#/admin"
+    "login_url": "https://dantv-portal.vercel.app/#/admin",
+    "allow_writes": true
   },
   {
     "id": "red-sky",
@@ -203,7 +213,8 @@
     "test_dir": "/home/danman60/projects/red-sky/tests/agent",
     "email": "test@red-sky.app",
     "password": "TestPassword123!",
-    "login_url": "https://red-sky-navy.vercel.app/login"
+    "login_url": "https://red-sky-navy.vercel.app/login",
+    "allow_writes": true
   },
   {
     "id": "recital-scheduler",
@@ -215,7 +226,8 @@
     "test_dir": "/home/danman60/projects/recital-scheduler/tests/agent",
     "email": "demo-owner@recital-scheduler.test",
     "password": "DIXVV+LFKGVO2mNFipFFW7TRTTDPMkcj",
-    "login_url": "https://recital-scheduler.vercel.app/login"
+    "login_url": "https://recital-scheduler.vercel.app/login",
+    "allow_writes": true
   },
   {
     "id": "unison",
@@ -228,7 +240,8 @@
     "email": "demo-tutor@unison.test",
     "password": "FM8gIdL4XSgCpcJkxrHFoy7n",
     "login_url": "https://unison-five.vercel.app/login",
-    "_note": "3 roles share DEMO_PASSWORD; checklist switches roles via sign-out + form login. Week 24 = sacrificial QA week."
+    "_note": "3 roles share DEMO_PASSWORD; checklist switches roles via sign-out + form login. Week 24 = sacrificial QA week.",
+    "allow_writes": true
   },
   {
     "id": "bask-prod",
@@ -247,7 +260,8 @@
     "login_url": "https://floortime-tau.vercel.app/login",
     "checklist": "/home/danman60/projects/floortime/tests/agent/flow-01-auth.md",
     "test_dir": "/home/danman60/projects/floortime/tests/agent",
-    "notes": "Demo login BUTTONS on /login ('Sign in as admin|teacher|family') \u2014 no email/password needed. DB oracles: ssh netcup + psql -d floortime (no Supabase MCP). Tests run against the DEMO tenant; it cannot send email."
+    "notes": "Demo login BUTTONS on /login ('Sign in as admin|teacher|family') — no email/password needed. DB oracles: ssh netcup + psql -d floortime (no Supabase MCP). Tests run against the DEMO tenant; it cannot send email.",
+    "allow_writes": true
   },
   {
     "name": "dance-cover",
@@ -269,7 +283,7 @@
     "email": "demo-studio@dancecover.test",
     "password": "No70ydCRPjKlEYaGvo3I",
     "login_url": "https://dance-cover.vercel.app/login",
-    "notes": "PRODUCTION, owner-authorised 2026-09-04 for the overnight E2E run. Writes real rows to the netcup tenant `dancecover` (https://sb-dancecover.djatb.fyi). SAFE BECAUSE: the app is unlaunched \u2014 every profile is is_demo and no real money has moved (verified: 11 profiles all is_demo, 3 bookings all unpaid). RULES: use ONLY the @dancecover.test demo accounts; delete any throwaway account you create (an orphaned qa-link-test@dancecover.test had to be cleaned up manually on 2026-09-05); Stripe stays TEST mode and the live key in ~/.env.keys is refused by src/lib/payments.ts; if you configure the platform fee, restore it to NULL afterwards. Do NOT re-seed \u2014 the seed is idempotent but re-seeding is not part of a read/write UI test. The repo URL keeps the dance-cover name; the PRODUCT is StudioShift."
+    "notes": "PRODUCTION, owner-authorised 2026-09-04 for the overnight E2E run. Writes real rows to the netcup tenant `dancecover` (https://sb-dancecover.djatb.fyi). SAFE BECAUSE: the app is unlaunched — every profile is is_demo and no real money has moved (verified: 11 profiles all is_demo, 3 bookings all unpaid). RULES: use ONLY the @dancecover.test demo accounts; delete any throwaway account you create (an orphaned qa-link-test@dancecover.test had to be cleaned up manually on 2026-09-05); Stripe stays TEST mode and the live key in ~/.env.keys is refused by src/lib/payments.ts; if you configure the platform fee, restore it to NULL afterwards. Do NOT re-seed — the seed is idempotent but re-seeding is not part of a read/write UI test. The repo URL keeps the dance-cover name; the PRODUCT is StudioShift."
   },
   {
     "id": "household",
@@ -281,7 +295,8 @@
     "test_dir": "/home/danman60/projects/household/tests/agent",
     "email": "demo-household@household.test",
     "password": "<DEMO_PASSWORD env in household/.env.local>",
-    "login_url": "http://100.122.177.91:3031/login"
+    "login_url": "http://100.122.177.91:3031/login",
+    "allow_writes": true
   },
   {
     "id": "studioshift-prod-shift",

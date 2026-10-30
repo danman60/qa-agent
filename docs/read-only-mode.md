@@ -27,3 +27,13 @@ not guarded. 7/7 pass.
 
 Cost on merge: remote web projects in this branch's projects.json whose checklists type or submit need
 `allow_writes: true` (or --allow-writes) — candidates: 21 compportal-cd compportal-sd compportal-sd-app compportal-prod amplify ddd studiosage lillearner-web memorialwise colourbook carly-hair-co tvbox-admin red-sky recital-scheduler unison bask-prod floortime studioshift-prod household studioshift-prod-shift groupquest-local
+
+## Opt-outs pre-set (02:59 ET)
+15 remote web projects get `"allow_writes": true` so their existing checklists keep typing and submitting:
+compportal-cd, compportal-sd, compportal-sd-app, amplify, ddd, studiosage, lillearner-web, memorialwise, carly-hair-co,
+tvbox-admin, red-sky, recital-scheduler, unison, floortime, household.
+Left guarded (their projects.json name says Prod): compportal-prod, colourbook, bask-prod, studioshift-prod,
+studioshift-prod-shift, groupquest-local ("GroupQuest (prod)"). Their checklists hold write steps (34, 2, 19, 39, 8, 39
+write-verb matches), so in server mode those runs will refuse typing until the owner adds `allow_writes` to each.
+The split follows only the owner's own "Prod" labels; any line can be flipped. The live checkout's uncommitted
+projects.json additions are all localhost and unaffected.
