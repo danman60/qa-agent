@@ -861,6 +861,23 @@ _CLICK_IS_SAFE = """e => {
 }"""
 
 
+LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def read_only_active(executor):
+    """--read-only always guards; otherwise any web page off this machine is guarded unless writes were allowed."""
+    if os.environ.get("QA_READ_ONLY") == "1":
+        return True
+    if os.environ.get("QA_ALLOW_WRITES") == "1":
+        return False
+    page = getattr(executor, "page", None)
+    if page is None:
+        return False  # Android/device executors: no web host to judge.
+    from urllib.parse import urlparse
+    host = urlparse(page.url).hostname or ""
+    return host not in LOCAL_HOSTS and not host.endswith(".localhost")
+
+
 def read_only_refusal(executor, cmd, role, name, value):
     """Reason to refuse this action in a read-only run, or None if it cannot write."""
     if cmd in ("FILL", "TYPE", "SELECT", "UPLOAD"):
@@ -887,7 +904,7 @@ def execute_action(executor, action):
     role = action.get("role", "")
     name = action.get("name", "")
     value = action.get("value", "")
-    if os.environ.get("QA_READ_ONLY") == "1":
+    if read_only_active(executor):
         refusal = read_only_refusal(executor, cmd, role, name, value)
         if refusal:
             return False, refusal
@@ -1731,6 +1748,7 @@ class DashHandler(BaseHTTPRequestHandler):
             return
 
         platform = proj.get("platform", "web")
+        os.environ["QA_ALLOW_WRITES"] = "1" if proj.get("allow_writes") else "0"
         url = proj.get("url", "")
         if not url and platform == "web":
             self._json({"ok": False, "error": f"Project {project_id} has no URL"})
@@ -2236,7 +2254,9 @@ def main():
                         help="Persistent dashboard server mode (project picker, run history)")
     parser.add_argument("--model", default="qwen3-coder:30b")
     parser.add_argument("--read-only", action="store_true",
-                        help="harness refuses typing, submits, form clicks and non-navigation keys (use on live sites)")
+                        help="harness refuses typing, submits, form clicks and non-navigation keys, even on localhost")
+    parser.add_argument("--allow-writes", action="store_true",
+                        help="allow typing and submits on a non-localhost site (read-only is the default there)")
     parser.add_argument("--provider", choices=["ollama", "ollama-local", "nim", "anthropic", "openrouter"], default="ollama")
     parser.add_argument("--ollama-url", default=None)
     parser.add_argument("--report-dir", default=None)
@@ -2265,6 +2285,8 @@ def main():
     args = parser.parse_args()
     if args.read_only:
         os.environ["QA_READ_ONLY"] = "1"
+    if args.allow_writes:
+        os.environ["QA_ALLOW_WRITES"] = "1"
 
     # ── Server mode ──────────────────────────────────────────────
     if args.server:
