@@ -846,12 +846,51 @@ def parse_response(response):
     return {"action": "NONE", "role": "", "name": "", "value": "", "reasoning": response[:80]}
 
 
+# Read-only runs (--read-only, for live sites): the harness refuses anything that can write, because the prompt alone
+# does not hold. 2026-10-30: a checklist saying "never press Ask" still had the model fill and press Ask on a prod site.
+SAFE_KEYS = {"escape", "tab", "shift+tab", "back", "arrowup", "arrowdown", "arrowleft", "arrowright",
+             "pageup", "pagedown", "home", "end"}
+# A click is allowed only on a plain link or a disclosure control (menu, tab, details), never inside a form.
+_CLICK_IS_SAFE = """e => {
+  const t = e.closest('a, button, summary, input, select, textarea, [role]') || e;
+  if (t.closest('form')) return false;
+  if (t.tagName === 'A' && t.getAttribute('href')) return true;
+  if (t.tagName === 'SUMMARY') return true;
+  const role = t.getAttribute('role') || '';
+  return ['tab', 'menuitem', 'link'].includes(role) || t.hasAttribute('aria-expanded') || t.hasAttribute('aria-haspopup');
+}"""
+
+
+def read_only_refusal(executor, cmd, role, name, value):
+    """Reason to refuse this action in a read-only run, or None if it cannot write."""
+    if cmd in ("FILL", "TYPE", "SELECT", "UPLOAD"):
+        return f"read-only run: {cmd} refused"
+    if cmd == "PRESS" and str(value or name or "").strip().lower() not in SAFE_KEYS:
+        return f"read-only run: key {value or name!r} refused"
+    if cmd == "CLICK":
+        page = getattr(executor, "page", None)
+        if page is None:
+            return "read-only run: CLICK refused (no page to inspect)"
+        el = (page.get_by_role(role, name=name) if role and name else page.get_by_text(name or "")).first
+        try:
+            safe = el.evaluate(_CLICK_IS_SAFE, timeout=5000)
+        except Exception as e:
+            return f"read-only run: CLICK refused, target not inspectable ({str(e)[:160]})"
+        if not safe:
+            return f"read-only run: CLICK on {role or 'element'} {name!r} refused (not a plain link or menu control)"
+    return None
+
+
 def execute_action(executor, action):
     """Execute a parsed action on the executor. Returns (success, detail)."""
     cmd = action["action"]
     role = action.get("role", "")
     name = action.get("name", "")
     value = action.get("value", "")
+    if os.environ.get("QA_READ_ONLY") == "1":
+        refusal = read_only_refusal(executor, cmd, role, name, value)
+        if refusal:
+            return False, refusal
 
     if cmd == "NAVIGATE":
         target = value or name
@@ -2196,6 +2235,8 @@ def main():
     parser.add_argument("--server", action="store_true",
                         help="Persistent dashboard server mode (project picker, run history)")
     parser.add_argument("--model", default="qwen3-coder:30b")
+    parser.add_argument("--read-only", action="store_true",
+                        help="harness refuses typing, submits, form clicks and non-navigation keys (use on live sites)")
     parser.add_argument("--provider", choices=["ollama", "ollama-local", "nim", "anthropic", "openrouter"], default="ollama")
     parser.add_argument("--ollama-url", default=None)
     parser.add_argument("--report-dir", default=None)
@@ -2222,6 +2263,8 @@ def main():
     parser.add_argument("--compare", default=None,
                         help="Compare models: 'ollama:qwen3-coder:30b,nim:kimi-k2.5'")
     args = parser.parse_args()
+    if args.read_only:
+        os.environ["QA_READ_ONLY"] = "1"
 
     # ── Server mode ──────────────────────────────────────────────
     if args.server:
