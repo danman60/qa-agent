@@ -28,7 +28,7 @@ not guarded. 7/7 pass.
 Cost on merge: remote web projects in this branch's projects.json whose checklists type or submit need
 `allow_writes: true` (or --allow-writes) — candidates: 21 compportal-cd compportal-sd compportal-sd-app compportal-prod amplify ddd studiosage lillearner-web memorialwise colourbook carly-hair-co tvbox-admin red-sky recital-scheduler unison bask-prod floortime studioshift-prod household studioshift-prod-shift groupquest-local
 
-## Opt-outs pre-set (02:59 ET)
+## Opt-outs pre-set (02:57 ET)
 15 remote web projects get `"allow_writes": true` so their existing checklists keep typing and submitting:
 compportal-cd, compportal-sd, compportal-sd-app, amplify, ddd, studiosage, lillearner-web, memorialwise, carly-hair-co,
 tvbox-admin, red-sky, recital-scheduler, unison, floortime, household.
@@ -37,3 +37,12 @@ studioshift-prod-shift, groupquest-local ("GroupQuest (prod)"). Their checklists
 write-verb matches), so in server mode those runs will refuse typing until the owner adds `allow_writes` to each.
 The split follows only the owner's own "Prod" labels; any line can be flipped. The live checkout's uncommitted
 projects.json additions are all localhost and unaffected.
+
+## Network layer (03:05 ET)
+Read-only runs also abort every non-GET/HEAD/OPTIONS request the page sends (`block_write_requests`, a context route
+installed on the first checklist action, after login). The action that triggered it fails with
+"read-only run: blocked N request(s): POST ...". A run with writes allowed installs no route.
+Check (real WebExecutor, local server): a menu control whose click fires `fetch(POST /track)` opened, the POST was
+blocked and reported, the link after it worked, and the server log shows only `GET /` and `GET /next.html`. With
+QA_ALLOW_WRITES=1 the same click reaches the server (`POST /track`). Limits: GET requests that change server state, and
+requests sent by a service worker, are not intercepted.

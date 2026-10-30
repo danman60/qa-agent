@@ -898,7 +898,40 @@ def read_only_refusal(executor, cmd, role, name, value):
     return None
 
 
+_blocked_requests = []
+
+
+def block_write_requests(executor):
+    """Second layer for read-only runs: abort any non-GET request the page sends (fetch, forms, beacons).
+    Installed on the first checklist action, so the harness login before it still works."""
+    page = getattr(executor, "page", None)
+    if page is None or getattr(executor, "_writes_blocked", False):
+        return
+    if os.environ.get("QA_ALLOW_WRITES") == "1" and os.environ.get("QA_READ_ONLY") != "1":
+        return  # Writes allowed for the whole run: no interception cost.
+
+    def handler(route):
+        req = route.request
+        if req.method in ("GET", "HEAD", "OPTIONS") or not read_only_active(executor):
+            return route.continue_()
+        _blocked_requests.append(f"{req.method} {req.url[:120]}")
+        return route.abort()
+
+    page.context.route("**/*", handler)
+    executor._writes_blocked = True
+
+
 def execute_action(executor, action):
+    """Execute a parsed action, with read-only checks before and after it."""
+    block_write_requests(executor)
+    _blocked_requests.clear()
+    ok, detail = _execute_action(executor, action)
+    if _blocked_requests:
+        return False, f"read-only run: blocked {len(_blocked_requests)} request(s): {'; '.join(_blocked_requests[:3])}"
+    return ok, detail
+
+
+def _execute_action(executor, action):
     """Execute a parsed action on the executor. Returns (success, detail)."""
     cmd = action["action"]
     role = action.get("role", "")
