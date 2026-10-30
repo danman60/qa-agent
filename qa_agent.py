@@ -669,7 +669,10 @@ class Browser:
         if self.visual:
             launch_opts["slow_mo"] = 300  # 300ms between actions for visibility
         self.browser = self.pw.chromium.launch(**launch_opts)
+        # Service-worker requests escape context routing, so read-only-capable runs block service workers.
+        _sw = "allow" if os.environ.get("QA_ALLOW_WRITES") == "1" and os.environ.get("QA_READ_ONLY") != "1" else "block"
         self.context = self.browser.new_context(
+            service_workers=_sw,
             viewport={"width": 1280, "height": 720},
             user_agent="QA-Agent/1.0",
         )
@@ -878,10 +881,27 @@ def read_only_active(executor):
     return host not in LOCAL_HOSTS and not host.endswith(".localhost")
 
 
+def request_guarded(url):
+    """Network layer: judge each request by where it goes, not by the page that sent it."""
+    if os.environ.get("QA_READ_ONLY") == "1":
+        return True
+    if os.environ.get("QA_ALLOW_WRITES") == "1":
+        return False
+    from urllib.parse import urlparse
+    host = urlparse(url).hostname or ""
+    return host not in LOCAL_HOSTS and not host.endswith(".localhost")
+
+
+# shortcut: a GET link can still change server state; this catches the common verbs only, not redirects.
+_MUTATING_URL = re.compile(r"(delete|remove|destroy|log-?out|sign-?out|unsubscribe|cancel|approve|reject|confirm|revoke|archive|reset)", re.I)
+
+
 def read_only_refusal(executor, cmd, role, name, value):
     """Reason to refuse this action in a read-only run, or None if it cannot write."""
     if cmd in ("FILL", "TYPE", "SELECT", "UPLOAD"):
         return f"read-only run: {cmd} refused"
+    if cmd == "NAVIGATE" and _MUTATING_URL.search(str(value or name or "")):
+        return f"read-only run: NAVIGATE to {value or name!r} refused (address looks like an action)"
     if cmd == "PRESS" and str(value or name or "").strip().lower() not in SAFE_KEYS:
         return f"read-only run: key {value or name!r} refused"
     if cmd == "CLICK":
@@ -895,6 +915,12 @@ def read_only_refusal(executor, cmd, role, name, value):
             return f"read-only run: CLICK refused, target not inspectable ({str(e)[:160]})"
         if not safe:
             return f"read-only run: CLICK on {role or 'element'} {name!r} refused (not a plain link or menu control)"
+        try:
+            href = el.evaluate("e => (e.closest('a') || {}).href || ''", timeout=5000)
+        except Exception:
+            href = ""
+        if _MUTATING_URL.search(href):
+            return f"read-only run: CLICK on link to {href[:100]!r} refused (address looks like an action)"
     return None
 
 
@@ -903,7 +929,7 @@ _blocked_requests = []
 
 def block_write_requests(executor):
     """Second layer for read-only runs: abort any non-GET request the page sends (fetch, forms, beacons).
-    Installed on the first checklist action, so the harness login before it still works."""
+    Installed right after the executor starts; the harness login runs inside executor._auth_window."""
     page = getattr(executor, "page", None)
     if page is None or getattr(executor, "_writes_blocked", False):
         return
@@ -912,7 +938,7 @@ def block_write_requests(executor):
 
     def handler(route):
         req = route.request
-        if req.method in ("GET", "HEAD", "OPTIONS") or not read_only_active(executor):
+        if req.method in ("GET", "HEAD", "OPTIONS") or getattr(executor, "_auth_window", False) or not request_guarded(req.url):
             return route.continue_()
         _blocked_requests.append(f"{req.method} {req.url[:120]}")
         return route.abort()
@@ -1481,6 +1507,7 @@ def run_agent(url, provider, model, checklist_items, report_dir,
         state.log("Executor setup failed", "error")
         return state
     state.log(f"Executor launched ({executor.__class__.__name__})", "success")
+    block_write_requests(executor)
 
     sys_prompt = SYSTEM_PROMPT
     # Android-specific additions
@@ -1498,7 +1525,12 @@ def run_agent(url, provider, model, checklist_items, report_dir,
     login_ok = True
     is_web = isinstance(executor, WebExecutor)
     if is_web and credentials and credentials.get("email"):
-        if not do_login(executor, state, credentials):
+        executor._auth_window = True  # Login may POST; the read-only network block allows it only here.
+        try:
+            logged_in = do_login(executor, state, credentials)
+        finally:
+            executor._auth_window = False
+        if not logged_in:
             state.log("Login FAILED — skipping all items that require auth", "error")
             login_ok = False
     elif is_web:

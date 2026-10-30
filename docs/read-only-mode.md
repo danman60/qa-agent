@@ -46,3 +46,16 @@ Check (real WebExecutor, local server): a menu control whose click fires `fetch(
 blocked and reported, the link after it worked, and the server log shows only `GET /` and `GET /next.html`. With
 QA_ALLOW_WRITES=1 the same click reaches the server (`POST /track`). Limits: GET requests that change server state, and
 requests sent by a service worker, are not intercepted.
+
+## Codex review fixes (03:00 ET)
+xreview (Codex, 02:59 ET) verdict FIX FIRST, 4 findings, all addressed:
+1. Network block now installed right after the executor starts; login POSTs pass only inside `executor._auth_window`
+   around `do_login` (any POST during that window passes, not only the auth call).
+2. CLICK on a link, or NAVIGATE, whose address matches delete/remove/destroy/logout/signout/unsubscribe/cancel/approve/
+   reject/confirm/revoke/archive/reset is refused. Shortcut: other mutating GET addresses and redirects still pass.
+3. Requests are judged by their destination host: a localhost page POSTing to a remote host is blocked by default.
+4. Browser contexts block service workers unless writes are allowed for the whole run.
+Checks (real WebExecutor, servers on 127.0.0.1 and 127.0.0.2 as "remote"): localhost page POST to remote blocked and
+reported, remote server log empty; delete link and NAVIGATE refused, plain link allowed; POST in the login window
+reached the remote server; with block mode the worker script was never fetched (0 workers) while allow mode fetched it
+(1 worker).

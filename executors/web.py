@@ -35,7 +35,10 @@ class WebExecutor(BaseExecutor):
         if self.visual:
             launch_opts["slow_mo"] = 300
         self.browser = self.pw.chromium.launch(**launch_opts)
+        # Service-worker requests escape context routing, so read-only-capable runs block service workers.
+        _sw = "allow" if os.environ.get("QA_ALLOW_WRITES") == "1" and os.environ.get("QA_READ_ONLY") != "1" else "block"
         self.context = self.browser.new_context(
+            service_workers=_sw,
             viewport={"width": self._viewport[0], "height": self._viewport[1]},
             user_agent="QA-Agent/1.0",
         )
