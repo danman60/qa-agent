@@ -16,7 +16,7 @@ Known limit: a link (GET) that changes state on the server, or a menu control wi
 Merge note: the live checkout (`~/projects/qa-agent` master) has uncommitted edits from 2026-09. This patch applies to
 it with hunks 1-2 clean and hunk 3 (the `if args.read_only:` lines after `args = parser.parse_args()`) by hand.
 
-## Default on for non-localhost sites (02:45 ET)
+## Default on for non-localhost sites (02:39 ET)
 Without flags, any web page whose host is not localhost/127.0.0.1/::1/*.localhost is guarded. `--allow-writes` (CLI)
 or `"allow_writes": true` on a projects.json entry (server mode) turns it off; `--read-only` guards even localhost.
 Login (`do_login`) bypasses the guard, so credentialed runs still sign in. Android/device executors are unaffected.
