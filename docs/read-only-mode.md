@@ -38,7 +38,7 @@ write-verb matches), so in server mode those runs will refuse typing until the o
 The split follows only the owner's own "Prod" labels; any line can be flipped. The live checkout's uncommitted
 projects.json additions are all localhost and unaffected.
 
-## Network layer (03:05 ET)
+## Network layer (02:58 ET)
 Read-only runs also abort every non-GET/HEAD/OPTIONS request the page sends (`block_write_requests`, a context route
 installed on the first checklist action, after login). The action that triggered it fails with
 "read-only run: blocked N request(s): POST ...". A run with writes allowed installs no route.
