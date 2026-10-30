@@ -938,12 +938,23 @@ def block_write_requests(executor):
 
     def handler(route):
         req = route.request
-        if req.method in ("GET", "HEAD", "OPTIONS") or getattr(executor, "_auth_window", False) or not request_guarded(req.url):
+        from urllib.parse import urlparse
+        in_auth = getattr(executor, "_auth_window", False) and urlparse(req.url).hostname in getattr(executor, "_auth_hosts", set())
+        if req.method in ("GET", "HEAD", "OPTIONS") or in_auth or not request_guarded(req.url):
             return route.continue_()
         _blocked_requests.append(f"{req.method} {req.url[:120]}")
         return route.abort()
 
+    def ws_handler(ws):
+        # WebSocket frames bypass HTTP routing. Not calling connect_to_server keeps a guarded socket off the
+        # server; ws.close() here deadlocks the sync API.
+        if request_guarded(ws.url):
+            _blocked_requests.append(f"WEBSOCKET {ws.url[:120]}")
+        else:
+            ws.connect_to_server()
+
     page.context.route("**/*", handler)
+    page.context.route_web_socket("**/*", ws_handler)
     executor._writes_blocked = True
 
 
@@ -1525,7 +1536,10 @@ def run_agent(url, provider, model, checklist_items, report_dir,
     login_ok = True
     is_web = isinstance(executor, WebExecutor)
     if is_web and credentials and credentials.get("email"):
-        executor._auth_window = True  # Login may POST; the read-only network block allows it only here.
+        # Login may POST; the read-only network block allows it only now and only to the login/auth hosts.
+        from urllib.parse import urlparse
+        executor._auth_hosts = {urlparse(u).hostname for u in (credentials.get("login_url", ""), credentials.get("supabase_url", "")) if u}
+        executor._auth_window = True
         try:
             logged_in = do_login(executor, state, credentials)
         finally:

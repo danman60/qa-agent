@@ -59,3 +59,14 @@ Checks (real WebExecutor, servers on 127.0.0.1 and 127.0.0.2 as "remote"): local
 reported, remote server log empty; delete link and NAVIGATE refused, plain link allowed; POST in the login window
 reached the remote server; with block mode the worker script was never fetched (0 workers) while allow mode fetched it
 (1 worker).
+
+## Second Codex review (03:00 ET review, fixes 03:15 ET)
+`~/.claude/xreviews/20261030-030049-qa-agent-readonly-3803815.md`, 3 findings:
+1. Auth window too broad: fixed. Inside the login window a POST passes only to the login page's host or the
+   Supabase URL (`executor._auth_hosts`). Check: POST to a non-auth host inside the window blocked; to the auth host
+   passed; after the window blocked. Remote server log: only `POST /track?auth-host`.
+2. Mutating-address check is a denylist, not an allowlist: not fixed, documented limit. A GET link with an innocent
+   name that changes server state still passes. The network block (non-GET) is the real guard.
+3. WebSockets not intercepted: fixed. `context.route_web_socket` refuses guarded sockets (never connects them;
+   `ws.close()` in the sync handler deadlocks, proven by traceback). Check: page opened `ws://127.0.0.2:48644`,
+   recorded as `WEBSOCKET ...`, raw listener logged 0 connects; with QA_ALLOW_WRITES=1 it logged 1 connect.
