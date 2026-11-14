@@ -27,9 +27,9 @@ note it and do not press it).** Run at 390 px and again at 1440 px.
 - [ ] Mark the financing condition fulfilled with a date; status and history update.
 
 ## Contract scan (privacy)
-- [ ] Upload the synthetic agreement fixture; "What left this computer" panel shows names, addresses and phones blanked.
+- [ ] Upload the synthetic agreement fixture; the "Text sent to be read for dates" panel (the text that left this computer) shows names, addresses and phones blanked.
 - [ ] Proposed conditions arrive unticked with type, party, date and quoted clause; confirm two; they appear on the deal.
-- [ ] No vendor name appears anywhere (the panel says "the LLM model").
+- [ ] No vendor name appears anywhere (the scan panel names no model at all; only the reviewer Readiness page says "LLM model").
 - [ ] An image-only PDF shows the plain "no readable text" message.
 
 ## Documents
@@ -46,7 +46,7 @@ note it and do not press it).** Run at 390 px and again at 1440 px.
 - [ ] Realtor switches the link off; client's next reload says the link is not active.
 
 ## Client health
-- [ ] With no contact days set: "Set your contact days". Set them; record contacts; bands show never / due / at risk / ok worst first.
+- [ ] With no contact days set (realtor-b; realtor-a has them set): "Set your contact days". Set them; record contacts; bands show never / due / at risk / ok worst first.
 - [ ] No send button anywhere on the health page.
 
 ## Sage (realtor)
@@ -58,4 +58,4 @@ note it and do not press it).** Run at 390 px and again at 1440 px.
 - [ ] Billing page says not set up (until a Stripe test key and price exist).
 - [ ] Reviewer: Members page adds and deactivates a realtor; readiness page lists every connection with a real result.
 - [ ] Feedback widget button appears and opens; a test note "closing-portal e2e test, ignore" submits or shows the
-      endpoint's refusal.
+      endpoint's refusal (the widget requires an email: use the synthetic e2e-test@closing-portal.test).
