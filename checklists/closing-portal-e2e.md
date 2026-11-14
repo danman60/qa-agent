@@ -64,5 +64,6 @@ note it and do not press it).** Run at 390 px and again at 1440 px.
 - [ ] Follow Up Boss page says not registered yet (until registration exists).
 - [ ] Billing page says not set up (until a Stripe test key and price exist).
 - [ ] Reviewer: Members page adds and deactivates a realtor; readiness page lists every connection with a real result.
-- [ ] Feedback widget button appears and opens; a test note "closing-portal e2e test, ignore" submits or shows the
-      endpoint's refusal (the widget requires an email: use the synthetic e2e-test@closing-portal.test).
+- [ ] Feedback widget button appears and opens, with a message box and an email box. DO NOT press "Send Feedback":
+      the real endpoint emails Daniel's inbox (3 test emails on 2026-11-14). Scripted runs catch the request in the
+      browser (fixtures/e2e-walk.cjs step 11.1) so nothing is sent.
