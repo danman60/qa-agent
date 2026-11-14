@@ -49,6 +49,14 @@ note it and do not press it).** Run at 390 px and again at 1440 px.
 - [ ] With no contact days set (realtor-b; realtor-a has them set): "Set your contact days". Set them; record contacts; bands show never / due / at risk / ok worst first.
 - [ ] No send button anywhere on the health page.
 
+## Arrange your screens (customizable lists, 2026-11-14)
+- [ ] Desk, People, Properties, Client health, Members (reviewer): **Cards** / **Table** switch; Table shows the same rows; the page never scrolls sideways at 390 (the table scrolls inside its box).
+- [ ] In Table, each column header sorts ascending, then descending, then back to the list's own order (header shows the arrow; aria-sort set); the order matches the data.
+- [ ] The sort box next to Search sorts the cards; a reload keeps the table and the sort (they are in the page address).
+- [ ] Search narrows the list; a search with no match says "No <things> match"; clearing it brings every row back.
+- [ ] Deal page: the sort box above **Checklist** and above **Documents** reorders those rows.
+- [ ] Desk: drag the grip next to **Your deals** onto **Coming up** (mouse), and again by keyboard (Space, arrow, Space) and touch (press 200 ms, drag); the order sticks after reload; another realtor's desk is unchanged; **Reset order** puts it back and then disappears.
+
 ## Sage (realtor)
 - [ ] Ask "who haven't I contacted?" and "when is the inspection deadline on <synthetic street>?"; answers match the data.
 - [ ] Ask about a person who is not yours; Sage has nothing on them.
