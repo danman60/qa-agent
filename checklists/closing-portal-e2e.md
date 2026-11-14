@@ -49,13 +49,12 @@ note it and do not press it).** Run at 390 px and again at 1440 px.
 - [ ] With no contact days set (realtor-b; realtor-a has them set): "Set your contact days". Set them; record contacts; bands show never / due / at risk / ok worst first.
 - [ ] No send button anywhere on the health page.
 
-## Arrange your screens (customizable lists, 2026-11-14)
-- [ ] Desk, People, Properties, Client health, Members (reviewer): **Cards** / **Table** switch; Table shows the same rows; the page never scrolls sideways at 390 (the table scrolls inside its box).
-- [ ] In Table, each column header sorts ascending, then descending, then back to the list's own order (header shows the arrow; aria-sort set); the order matches the data.
-- [ ] The sort box next to Search sorts the cards; a reload keeps the table and the sort (they are in the page address).
-- [ ] Search narrows the list; a search with no match says "No <things> match"; clearing it brings every row back.
-- [ ] Deal page: the sort box above **Checklist** and above **Documents** reorders those rows.
-- [ ] Desk: drag the grip next to **Your deals** onto **Coming up** (mouse), and again by keyboard (Space, arrow, Space) and touch (press 200 ms, drag); the order sticks after reload; another realtor's desk is unchanged; **Reset order** puts it back and then disappears.
+## Arrange your screens (customizable lists, 2026-11-14; simplified the same day)
+- [ ] Desk, People, Properties, Client health, Members (reviewer), deal Checklist and Documents: the untouched screen shows no sort box, search box, view toggle or drag grip; one small **View** button sits above each list.
+- [ ] **View** opens a menu (closes on a click outside or Escape) with **Show as** Cards / Table, **Sort by**, **Search**; once anything is changed a dot shows on View and **Reset view** puts the list back.
+- [ ] Table shows the same rows; the page never scrolls sideways at 390 (the table scrolls inside its box). Each column header sorts ascending, then descending, then back to the list's own order (arrow shown; aria-sort set); the order matches the data.
+- [ ] A reload keeps the table and the sort (page address). Search narrows the list; no match says "No <things> match" with **Clear the search**.
+- [ ] Desk: **View** > **Arrange sections** shows the grips and a bar with **Done**; drag the grip next to **Your deals** onto **Coming up** (mouse), and again by keyboard (focus lands on the grip; Space, arrow, Space) and touch (press 200 ms, drag); the order sticks after reload (grips hidden again); another realtor's desk is unchanged; **Reset order** in the bar puts it back.
 
 ## Sage (realtor)
 - [ ] Ask "who haven't I contacted?" and "when is the inspection deadline on <synthetic street>?"; answers match the data.
